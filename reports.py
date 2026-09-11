@@ -81,6 +81,23 @@ def _save_state(st: dict) -> None:
         json.dump(st, fh)
 
 
+def send_startup(notifier) -> None:
+    """Reporte de arranque: confirma que el canal de reportes quedó conectado.
+
+    Se envía UNA vez cada vez que el bot arranca. Muestra la tasa de acierto
+    acumulada (histórica) para verificar de inmediato el canal, sin esperar a
+    la hora programada.
+    """
+    since = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    st = hit_stats(since)
+    ahora = datetime.now(_COL).strftime("%Y-%m-%d %H:%M")
+    encabezado = (f"🟢 <b>Canal de reportes conectado</b>\n"
+                  f"<i>Arranque {ahora} (hora Colombia)</i>\n"
+                  f"Aquí llegarán: tasa de acierto (diaria/semanal/quincenal/"
+                  f"mensual) y el Excel jugador-equipo.\n\n")
+    notifier.send(encabezado + _format("acumulado", st))
+
+
 def maybe_send(notifier) -> None:
     """Revisa la hora Colombia y envía los reportes que toquen (una vez cada uno)."""
     now = datetime.now(_COL)

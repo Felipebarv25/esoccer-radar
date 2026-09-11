@@ -40,6 +40,13 @@ def main():
     if not args.no_startup:
         notifier.send("🟢 <b>eSoccer Radar activo</b>\nAnalizando próximos partidos de "
                       "eSports Battle. <i>Datos, NO pronósticos.</i>")
+    # Reporte de arranque al canal de reportes: confirma que quedó conectado
+    # sin esperar a la hora programada. Va aunque --no-startup silencie el canal
+    # de análisis, porque el de reportes es silencioso (solo en reinicios).
+    try:
+        reports.send_startup(reports_notifier)
+    except Exception as e:
+        print(f"[WARN] reports.send_startup: {e}", file=sys.stderr)
 
     while True:
         try:
