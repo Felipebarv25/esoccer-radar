@@ -193,6 +193,40 @@ def player_team_breakdown(views, player, min_n=1):
     return rows
 
 
+def player_hour_rows(views):
+    """Filas jugador+hora (para el Excel): en qué franjas juega y cómo le va.
+
+    Sale de NUESTROS registros cerrados (traen la hora COL y el resultado).
+    """
+    agg = defaultdict(lambda: {"n": 0, "w": 0, "gf": 0, "ga": 0})
+    for v in views:
+        if v["outcome"] not in _CONPICK or v["start_col"] is None:
+            continue
+        h = v["start_col"].hour
+        for who, gf, ga in ((v["p1"], v["sa"], v["sb"]), (v["p2"], v["sb"], v["sa"])):
+            if not who:
+                continue
+            a = agg[(who, h)]
+            a["n"] += 1
+            if gf is not None and ga is not None:
+                a["gf"] += gf
+                a["ga"] += ga
+            if v["winner"] == who:
+                a["w"] += 1
+    rows = []
+    for (who, h), a in agg.items():
+        g = a["n"]
+        rows.append({
+            "jugador": who, "hora": f"{h:02d}:00", "partidos": g,
+            "G": a["w"], "win_%": round(100 * a["w"] / g) if g else 0,
+            "goles_a_favor_pp": round(a["gf"] / g, 2) if g else 0,
+            "goles_en_contra_pp": round(a["ga"] / g, 2) if g else 0,
+            "muestra": "ok" if g >= 6 else "poca",
+        })
+    rows.sort(key=lambda r: (r["jugador"], r["hora"]))
+    return rows
+
+
 def weekday_board(views):
     """Aciertos por día de la semana (hora Colombia). EXPLORATORIO."""
     agg = defaultdict(lambda: {"conpick": 0, "acierto": 0})

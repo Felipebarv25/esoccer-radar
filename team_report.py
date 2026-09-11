@@ -15,6 +15,7 @@ import os
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
+import analytics
 from esb_source import ESBSource, _FINISHED_TOURNAMENT
 
 _MATCH_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "matches")
@@ -88,8 +89,39 @@ def write_csv(agg: dict, path: str) -> int:
     return len(rows)
 
 
+def write_hours_csv(rows: list, path: str) -> int:
+    fields = ["jugador", "hora", "partidos", "G", "win_%",
+              "goles_a_favor_pp", "goles_en_contra_pp", "muestra"]
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8-sig", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=fields)
+        w.writeheader()
+        w.writerows(rows)
+    return len(rows)
+
+
+def generate_hours_and_send(notifier) -> int:
+    """Genera y envía el CSV jugador-hora (en qué franjas juega cada uno)."""
+    rows = analytics.player_hour_rows(analytics.load_views())
+    if not rows:
+        notifier.send("🕐 Aún no hay datos de jugador–hora (se llena con los "
+                      "cierres de partidos). Prueba de nuevo más tarde.")
+        return 0
+    fecha = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    path = os.path.join(_OUT_DIR, f"jugador-hora_{fecha}.csv")
+    n = write_hours_csv(rows, path)
+    caption = (f"🕐 <b>Reporte jugador–hora</b>\n"
+               f"{n} combinaciones jugador+franja horaria (hora Colombia). "
+               f"Sirve para ver en qué horas suele jugar cada uno y en cuáles "
+               f"le va mejor. Ábrelo en Excel y ordena por jugador o por win_%.\n"
+               f"<i>Muestra 'poca' = pocos partidos, aún no concluyente.</i>")
+    notifier.send_document(path, caption)
+    print(f"[REPORT] jugador-hora enviado ({n} filas)")
+    return n
+
+
 def generate_and_send(notifier, days: int = 3) -> int:
-    """Genera el CSV jugador-equipo y lo envía al canal. Devuelve nº de filas."""
+    """Genera y envía AMBOS Excel: jugador-equipo y jugador-hora. Devuelve filas del 1º."""
     source = ESBSource()
     players = alerted_players()
     agg = build(source, players, days=days)
@@ -101,4 +133,9 @@ def generate_and_send(notifier, days: int = 3) -> int:
                f"<i>Muestra 'poca' = pocos partidos, tómalo con pinzas.</i>")
     notifier.send_document(path, caption)
     print(f"[REPORT] jugador-equipo enviado ({n} filas)")
+    # Segundo Excel: jugador-hora (franjas en que juega y su rendimiento).
+    try:
+        generate_hours_and_send(notifier)
+    except Exception as e:
+        print(f"[WARN] jugador-hora: {e}")
     return n
