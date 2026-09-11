@@ -233,6 +233,25 @@ def _join(bloques) -> str:
     return "\n\n".join(b for b in bloques if b)
 
 
+def build_hourly(win_start, win_end):
+    """Texto del resumen de una hora [win_start, win_end) COL. None si 0 partidos."""
+    views = analytics.load_views()
+    ventana = analytics.in_window(views, win_start, win_end)
+    sb = analytics.scoreboard(ventana)
+    if sb["analizados"] == 0:
+        return None
+    cab = (f"🕐 <b>Reporte {win_start:%H:%M}–{win_end:%H:%M}</b> "
+           f"(hora Colombia, {win_start:%d/%m})")
+    return _join([
+        cab,
+        _fmt_scoreboard(sb),
+        _fmt_players(analytics.player_perf(ventana, min_n=1),
+                     "Mejores jugadores de la hora", top=5),
+        _fmt_goals(analytics.goals_summary(ventana)),
+        _NOTA,
+    ])
+
+
 def maybe_hourly(notifier) -> None:
     """Cada hora (a los ~12 min) envía el resumen de la hora COMPLETA anterior.
 
@@ -248,40 +267,22 @@ def maybe_hourly(notifier) -> None:
     st = _load_state()
     if st.get("hourly") == label:
         return
-
-    views = analytics.load_views()
-    ventana = analytics.in_window(views, win_start, win_end)
-    sb = analytics.scoreboard(ventana)
-    # Si no hubo partidos en esa hora (madrugada), no mandamos ruido; marcamos
-    # el estado para no reintentar esa ventana.
-    if sb["analizados"] == 0:
-        st["hourly"] = label
-        _save_state(st)
-        return
-    cab = (f"🕐 <b>Reporte {win_start:%H:%M}–{win_end:%H:%M}</b> "
-           f"(hora Colombia, {win_start:%d/%m})")
-    bloques = [
-        cab,
-        _fmt_scoreboard(sb),
-        _fmt_players(analytics.player_perf(ventana, min_n=1),
-                     "Mejores jugadores de la hora", top=5),
-        _fmt_goals(analytics.goals_summary(ventana)),
-        _NOTA,
-    ]
-    notifier.send(_join(bloques))
+    texto = build_hourly(win_start, win_end)
+    if texto:  # None = no hubo partidos en esa hora; no mandamos ruido
+        notifier.send(texto)
     st["hourly"] = label
     _save_state(st)
 
 
-def _send_daily_deep(notifier) -> None:
-    """Análisis profundo del día (jugadores, equipos, calibración, tendencias)."""
+def build_daily_deep() -> str:
+    """Texto del análisis profundo del día (jugadores, equipos, calibración...)."""
     now = datetime.now(_COL)
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     views = analytics.load_views()
     hoy = analytics.in_window(views, day_start, now + timedelta(minutes=1))
 
     cab = f"🔎 <b>Análisis profundo del día</b> — {now:%d/%m/%Y}"
-    bloques = [
+    return _join([
         cab,
         # del día
         _fmt_players(analytics.player_perf(hoy, min_n=2), "Mejores jugadores del día"),
@@ -293,8 +294,35 @@ def _send_daily_deep(notifier) -> None:
         _fmt_weekday(analytics.weekday_board(views)),
         _fmt_hourband(analytics.hour_board(views, min_n=3)),
         _NOTA,
-    ]
-    notifier.send(_join(bloques))
+    ])
+
+
+def _send_daily_deep(notifier) -> None:
+    notifier.send(build_daily_deep())
+
+
+# ---- generadores "a pedido" (para los comandos de Telegram) ----
+def since_today_utc():
+    return datetime.now(_COL).replace(hour=0, minute=0, second=0,
+                                      microsecond=0).astimezone(timezone.utc)
+
+
+def since_days_utc(n: int):
+    return (datetime.now(_COL) - timedelta(days=n)).astimezone(timezone.utc)
+
+
+def text_rate(label: str, since_utc) -> str:
+    """Tasa de acierto formateada para un periodo (para responder a un comando)."""
+    return _format(label, hit_stats(since_utc))
+
+
+def text_last_hour() -> str:
+    """Resumen de la última hora COMPLETA (para el comando /hora)."""
+    now = datetime.now(_COL)
+    win_end = now.replace(minute=0, second=0, microsecond=0)
+    win_start = win_end - timedelta(hours=1)
+    return build_hourly(win_start, win_end) or (
+        f"🕐 Sin partidos con marcador entre {win_start:%H:%M} y {win_end:%H:%M} COL.")
 
 
 def maybe_team_report(notifier) -> None:

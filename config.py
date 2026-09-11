@@ -11,6 +11,9 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 # Canal SOLO para reportes (tasa de acierto + Excel). Si no se define, usa el
 # mismo canal principal.
 TELEGRAM_REPORTS_CHAT_ID = os.getenv("TELEGRAM_REPORTS_CHAT_ID", "").strip() or TELEGRAM_CHAT_ID
+# Usuario dueño: SOLO este id de Telegram puede pedir reportes por comando. Si se
+# deja vacío, cualquiera que le escriba al bot podría pedirlos (no recomendado).
+TELEGRAM_OWNER_ID = os.getenv("TELEGRAM_OWNER_ID", "").strip()
 # Cada cuánto se consulta la lista de próximos partidos.
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
 

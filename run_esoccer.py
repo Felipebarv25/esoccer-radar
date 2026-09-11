@@ -33,6 +33,13 @@ def main():
     source = ESBSource()
     notifier = TelegramNotifier()                                  # canal de análisis
     reports_notifier = TelegramNotifier(chat_id=config.TELEGRAM_REPORTS_CHAT_ID)  # canal de reportes
+
+    # Escucha de comandos a pedido (/semana, /mes, ...) por chat privado con el bot.
+    try:
+        import commands
+        commands.start_in_thread()
+    except Exception as e:
+        print(f"[WARN] no pude iniciar comandos: {e}", file=sys.stderr)
     seen = persistence.already_saved_ids()   # no re-avisar los ya guardados
     pending = persistence.load_open()        # partidos alertados sin desenlace aún
 
