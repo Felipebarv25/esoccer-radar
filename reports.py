@@ -116,3 +116,41 @@ def maybe_send(notifier) -> None:
 
     if sent:
         _save_state(st)
+
+
+def maybe_team_report(notifier) -> None:
+    """Cada 2 días, a las 18:00 COL, genera y envía el CSV jugador-equipo (#5c).
+
+    Corre en un hilo aparte porque tarda (recorre muchos torneos).
+    """
+    import threading
+
+    now = datetime.now(_COL)
+    if now.hour < 18:
+        return
+    st = _load_state()
+    day = now.strftime("%Y-%m-%d")
+    last = st.get("team_report")
+    if last == day:
+        return
+    fire = True
+    if last:
+        try:
+            d0 = datetime.strptime(last, "%Y-%m-%d").date()
+            fire = (now.date() - d0).days >= 2
+        except Exception:
+            fire = True
+    if not fire:
+        return
+    st["team_report"] = day
+    _save_state(st)
+
+    def _run():
+        try:
+            import team_report
+            team_report.generate_and_send(notifier)
+        except Exception as e:
+            import sys
+            print(f"[WARN] team_report: {e}", file=sys.stderr)
+
+    threading.Thread(target=_run, daemon=True).start()

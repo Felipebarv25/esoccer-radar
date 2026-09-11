@@ -76,8 +76,9 @@ def main():
         # Reportes programados de tasa de acierto (diario/semanal/quincenal/mensual).
         try:
             reports.maybe_send(notifier)
+            reports.maybe_team_report(notifier)  # CSV jugador-equipo cada 2 días
         except Exception as e:
-            print(f"[WARN] reports.maybe_send: {e}", file=sys.stderr)
+            print(f"[WARN] reports: {e}", file=sys.stderr)
 
         if nuevos:
             print(f"[ciclo] {len(pairs)} próximos · {nuevos} nuevos · pendientes {len(pending)}",

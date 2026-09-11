@@ -9,7 +9,24 @@ from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 class TelegramNotifier:
     def __init__(self, token: str = TELEGRAM_BOT_TOKEN, chat_id: str = TELEGRAM_CHAT_ID):
         self.chat_id = chat_id
+        self.token = token
         self.api_url = f"https://api.telegram.org/bot{token}/sendMessage"
+
+    def send_document(self, file_path: str, caption: str = "") -> bool:
+        """Envía un archivo (CSV/Excel) al canal."""
+        url = f"https://api.telegram.org/bot{self.token}/sendDocument"
+        try:
+            with open(file_path, "rb") as fh:
+                resp = requests.post(
+                    url, data={"chat_id": self.chat_id, "caption": caption,
+                               "parse_mode": "HTML"},
+                    files={"document": fh}, timeout=60)
+            if resp.status_code == 200:
+                return True
+            print(f"[Telegram] doc error {resp.status_code}: {resp.text[:200]}")
+        except Exception as e:
+            print(f"[Telegram] doc excepción: {e}")
+        return False
 
     def send(self, text: str, reply_to: int = None, max_retries: int = 3):
         """Envía un mensaje. Devuelve el message_id (int) si sale bien, o None.
