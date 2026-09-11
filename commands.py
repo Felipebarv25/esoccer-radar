@@ -28,6 +28,9 @@ _HELP = (
     "/semana — tasa de acierto (últimos 7 días)\n"
     "/quincena — tasa (últimos 15 días)\n"
     "/mes — tasa (últimos 30 días)\n"
+    "/jugadores — mejores jugadores del día\n"
+    "/jugadores semana — mejores de la semana\n"
+    "/jugadores mes — mejores del mes\n"
     "/excel — Excel jugador-equipo al momento\n"
     "/ayuda — esta lista\n\n"
     "📢 Puedes escribir estos comandos <b>directamente en el canal de "
@@ -50,13 +53,19 @@ def _authorized(uid) -> bool:
     return (not owner) or (str(uid) == str(owner))
 
 
-def _norm(text: str) -> str:
-    # "/Semana@EsoccerBot arg" -> "semana"; normaliza acentos (dia/día)
-    cmd = text.strip().split()[0].lstrip("/").split("@")[0].lower()
-    return cmd.replace("í", "i").replace("á", "a")
+def _norm(tok: str) -> str:
+    return tok.lstrip("/").split("@")[0].lower().replace("í", "i").replace("á", "a")
 
 
-def _texts_for(cmd):
+def _split(text: str):
+    """Devuelve (cmd, arg) normalizados. '/jugadores Semana' -> ('jugadores','semana')."""
+    parts = text.strip().split()
+    cmd = _norm(parts[0]) if parts else ""
+    arg = _norm(parts[1]) if len(parts) > 1 else ""
+    return cmd, arg
+
+
+def _texts_for(cmd, arg=""):
     """Devuelve (kind, payload). kind: 'text' | 'excel' | 'help' | 'unknown'."""
     if cmd in ("start", "help", "ayuda"):
         return "help", None
@@ -73,7 +82,25 @@ def _texts_for(cmd):
         return "text", [reports.text_rate("del mes", reports.since_days_utc(30))]
     if cmd in ("excel", "csv"):
         return "excel", None
-    return "unknown", None
+    # mejores jugadores por periodo: /jugadores [dia|semana|mes] (o alias juntos)
+    if cmd in ("jugadores", "mejores", "players"):
+        periodo = arg or "dia"
+    elif cmd in ("jugadoresdia", "jugadoreshoy"):
+        periodo = "dia"
+    elif cmd in ("jugadoressemana",):
+        periodo = "semana"
+    elif cmd in ("jugadoresmes",):
+        periodo = "mes"
+    else:
+        return "unknown", None
+    if periodo in ("semana", "week"):
+        return "text", [reports.text_top_players("de la semana",
+                                                 reports.since_days_utc(7), min_n=3)]
+    if periodo in ("mes", "month"):
+        return "text", [reports.text_top_players("del mes",
+                                                 reports.since_days_utc(30), min_n=3)]
+    return "text", [reports.text_top_players("del día",
+                                             reports.since_today_utc(), min_n=2)]
 
 
 def _deliver(target_chat, kind, payload):
@@ -99,20 +126,20 @@ def _handle_channel(chat_id, text):
     """Comando escrito DENTRO de un canal (solo el canal de reportes)."""
     if str(chat_id) != str(config.TELEGRAM_REPORTS_CHAT_ID):
         return  # ignorar comandos en otros canales
-    cmd = _norm(text)
-    kind, payload = _texts_for(cmd)
+    cmd, arg = _split(text)
+    kind, payload = _texts_for(cmd, arg)
     _deliver(config.TELEGRAM_REPORTS_CHAT_ID, kind, payload)  # responde en el mismo canal
-    print(f"[CMD] canal cmd={cmd}", file=sys.stderr)
+    print(f"[CMD] canal cmd={cmd} arg={arg}", file=sys.stderr)
 
 
 def _handle_private(chat_id, uid, text):
     """Comando por chat privado con el bot (autorizado por id de dueño)."""
-    cmd = _norm(text)
+    cmd, arg = _split(text)
     if not _authorized(uid):
         _send(chat_id, "⛔ No autorizado.")
         print(f"[CMD] rechazado uid={uid} cmd={cmd}", file=sys.stderr)
         return
-    kind, payload = _texts_for(cmd)
+    kind, payload = _texts_for(cmd, arg)
     if kind in ("help", "unknown"):
         _deliver(chat_id, kind, payload)               # ayuda/errores al privado
     else:
@@ -141,9 +168,6 @@ def poll_loop():
                 cp = upd.get("channel_post")
                 if cp:
                     text = cp.get("text", "") or ""
-                    print(f"[CMD][debug] channel_post chat={cp.get('chat',{}).get('id')} "
-                          f"(esperado {config.TELEGRAM_REPORTS_CHAT_ID}) "
-                          f"text={text[:40]!r}", file=sys.stderr)
                     if text.startswith("/"):
                         _handle_channel(cp["chat"]["id"], text)
                     continue

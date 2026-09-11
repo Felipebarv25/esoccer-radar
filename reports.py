@@ -325,6 +325,19 @@ def text_last_hour() -> str:
         f"🕐 Sin partidos con marcador entre {win_start:%H:%M} y {win_end:%H:%M} COL.")
 
 
+def text_top_players(label: str, since_utc, min_n: int = 2, top: int = 10) -> str:
+    """Mejores jugadores (por win% real) en un periodo. Para /jugadores."""
+    since_col = since_utc.astimezone(_COL)
+    views = analytics.load_views()
+    win = analytics.in_window(views, since_col, datetime.now(_COL) + timedelta(minutes=1))
+    rows = analytics.player_perf(win, min_n=min_n)
+    bloque = _fmt_players(rows, f"Mejores jugadores {label}", top=top)
+    if not bloque:
+        bloque = (f"🏅 <b>Mejores jugadores {label}</b>\n"
+                  f"Sin datos suficientes aún (mínimo {min_n} partidos por jugador).")
+    return _join([bloque, _NOTA])
+
+
 def maybe_team_report(notifier) -> None:
     """Cada 2 días, a las 18:00 COL, genera y envía el CSV jugador-equipo (#5c).
 
