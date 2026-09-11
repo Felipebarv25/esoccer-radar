@@ -30,6 +30,8 @@ _HELP = (
     "/mes — tasa (últimos 30 días)\n"
     "/jugadores [semana|quincena|mes] — mejores jugadores\n"
     "/peores [semana|quincena|mes] — peores jugadores\n"
+    "/equipos — mejores/peores duplas jugador+equipo\n"
+    "/equipos &lt;jugador&gt; — con qué equipos rinde ese jugador\n"
     "/excel — Excel jugador-equipo al momento\n"
     "/ayuda — esta lista\n\n"
     "📢 Puedes escribir estos comandos <b>directamente en el canal de "
@@ -57,14 +59,16 @@ def _norm(tok: str) -> str:
 
 
 def _split(text: str):
-    """Devuelve (cmd, arg) normalizados. '/jugadores Semana' -> ('jugadores','semana')."""
-    parts = text.strip().split()
+    """Devuelve (cmd, arg, rawarg). arg normalizado; rawarg conserva mayúsculas (nicks)."""
+    t = text.strip()
+    parts = t.split()
     cmd = _norm(parts[0]) if parts else ""
     arg = _norm(parts[1]) if len(parts) > 1 else ""
-    return cmd, arg
+    rawarg = t[len(parts[0]):].strip() if len(parts) > 1 else ""
+    return cmd, arg, rawarg
 
 
-def _texts_for(cmd, arg=""):
+def _texts_for(cmd, arg="", rawarg=""):
     """Devuelve (kind, payload). kind: 'text' | 'excel' | 'help' | 'unknown'."""
     if cmd in ("start", "help", "ayuda"):
         return "help", None
@@ -81,6 +85,11 @@ def _texts_for(cmd, arg=""):
         return "text", [reports.text_rate("del mes", reports.since_days_utc(30))]
     if cmd in ("excel", "csv"):
         return "excel", None
+    # jugador+equipo: /equipos (global) o /equipos <nick> (desglose del jugador)
+    if cmd in ("equipos", "combos", "je", "jugadorequipo"):
+        if rawarg:
+            return "text", [reports.text_player_breakdown(rawarg)]
+        return "text", [reports.text_combos()]
     # ranking de jugadores por periodo (mejores o peores)
     fn = periodo = None
     if cmd in ("jugadores", "mejores", "players"):
@@ -148,20 +157,20 @@ def _handle_channel(chat_id, text):
     """Comando escrito DENTRO de un canal (solo el canal de reportes)."""
     if str(chat_id) != str(config.TELEGRAM_REPORTS_CHAT_ID):
         return  # ignorar comandos en otros canales
-    cmd, arg = _split(text)
-    kind, payload = _texts_for(cmd, arg)
+    cmd, arg, rawarg = _split(text)
+    kind, payload = _texts_for(cmd, arg, rawarg)
     _deliver(config.TELEGRAM_REPORTS_CHAT_ID, kind, payload)  # responde en el mismo canal
     print(f"[CMD] canal cmd={cmd} arg={arg}", file=sys.stderr)
 
 
 def _handle_private(chat_id, uid, text):
     """Comando por chat privado con el bot (autorizado por id de dueño)."""
-    cmd, arg = _split(text)
+    cmd, arg, rawarg = _split(text)
     if not _authorized(uid):
         _send(chat_id, "⛔ No autorizado.")
         print(f"[CMD] rechazado uid={uid} cmd={cmd}", file=sys.stderr)
         return
-    kind, payload = _texts_for(cmd, arg)
+    kind, payload = _texts_for(cmd, arg, rawarg)
     if kind in ("help", "unknown"):
         _deliver(chat_id, kind, payload)               # ayuda/errores al privado
     else:

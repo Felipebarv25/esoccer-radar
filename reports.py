@@ -338,6 +338,61 @@ def text_top_players(label: str, since_utc, min_n: int = 2, top: int = 10) -> st
     return _join([bloque, _NOTA])
 
 
+def text_combos(min_n: int = 2, top: int = 12) -> str:
+    """Ranking global de duplas jugador+equipo (mejores y peores). Para /equipos."""
+    views = analytics.load_views()
+    rows = analytics.player_team(views, min_n=min_n)  # ya viene ordenado desc por wr
+    if not rows:
+        return _join(["🎮 <b>Duplas jugador+equipo</b>\n"
+                      f"Sin datos suficientes aún (mínimo {min_n} partidos por dupla).",
+                      _NOTA])
+
+    def _line(r):
+        return f"• {r['player']} con {r['team']} — {r['wr']}% ({r['w']}/{r['n']})"
+
+    if len(rows) <= top:
+        lineas = ["🎮 <b>Duplas jugador+equipo</b> (mejor → peor)"]
+        lineas += [_line(r) for r in rows]
+    else:
+        peores = sorted(rows, key=lambda r: (r["wr"], -r["n"]))[:top]
+        lineas = ["🔝 <b>Mejores duplas jugador+equipo</b>"]
+        lineas += [_line(r) for r in rows[:top]]
+        lineas += ["", "📉 <b>Peores duplas jugador+equipo</b>"]
+        lineas += [_line(r) for r in peores]
+    return _join(["\n".join(lineas), _NOTA])
+
+
+def text_player_breakdown(nick: str) -> str:
+    """Desglose de un jugador equipo por equipo (con cuáles va bien/mal). /equipos <nick>."""
+    views = analytics.load_views()
+    nombres = analytics.player_names(views)
+    match = next((n for n in nombres if n.lower() == nick.lower()), None)
+    if not match:
+        cands = sorted(n for n in nombres if nick.lower() in n.lower())
+        if len(cands) == 1:
+            match = cands[0]
+        elif cands:
+            return "🔎 ¿A cuál te refieres? " + ", ".join(cands[:12])
+        else:
+            return f"No tengo datos de «{nick}» todavía."
+    rows = analytics.player_team_breakdown(views, match, min_n=1)
+    if not rows:
+        return f"Sin partidos cerrados de {match} aún."
+    lineas = [f"🎮 <b>{match} — rendimiento por equipo</b>"]
+    for r in rows:
+        if r["n"] < 3:
+            flag = "⚠️"
+        elif r["wr"] >= 60:
+            flag = "✅"
+        elif r["wr"] <= 40:
+            flag = "🔻"
+        else:
+            flag = "•"
+        lineas.append(f"{flag} {r['team']} — {r['wr']}% ({r['w']}/{r['n']})")
+    lineas.append("<i>✅ juega bien · 🔻 juega mal · ⚠️ muestra chica (&lt;3)</i>")
+    return _join(["\n".join(lineas), _NOTA])
+
+
 def text_worst_players(label: str, since_utc, min_n: int = 2, top: int = 10) -> str:
     """Peores jugadores (menor win% real) en un periodo. Para /peores."""
     since_col = since_utc.astimezone(_COL)

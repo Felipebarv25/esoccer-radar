@@ -162,6 +162,37 @@ def player_team(views, min_n=2):
     return rows
 
 
+def player_names(views):
+    """Conjunto de todos los nicknames vistos (para buscar por comando)."""
+    s = set()
+    for v in views:
+        if v["p1"]:
+            s.add(v["p1"])
+        if v["p2"]:
+            s.add(v["p2"])
+    return s
+
+
+def player_team_breakdown(views, player, min_n=1):
+    """Rendimiento de UN jugador equipo por equipo (con cuáles gana/pierde)."""
+    agg = defaultdict(lambda: {"n": 0, "w": 0})
+    for v in views:
+        if v["outcome"] not in _CONPICK:
+            continue
+        for team, who in ((v["t1"], v["p1"]), (v["t2"], v["p2"])):
+            if who != player or not team:
+                continue
+            a = agg[team]
+            a["n"] += 1
+            if v["winner"] == who:
+                a["w"] += 1
+    rows = [{"team": t, "n": a["n"], "w": a["w"],
+             "wr": round(100 * a["w"] / a["n"]) if a["n"] else 0}
+            for t, a in agg.items() if a["n"] >= min_n]
+    rows.sort(key=lambda r: (r["wr"], r["n"]), reverse=True)
+    return rows
+
+
 def weekday_board(views):
     """Aciertos por día de la semana (hora Colombia). EXPLORATORIO."""
     agg = defaultdict(lambda: {"conpick": 0, "acierto": 0})
