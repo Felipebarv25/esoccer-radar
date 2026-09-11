@@ -1,5 +1,21 @@
 """Arma el mensaje de análisis de un partido para Telegram."""
 import html
+from datetime import datetime, timedelta, timezone
+
+_COL = timezone(timedelta(hours=-5))  # Colombia = UTC-5 (sin horario de verano)
+
+
+def _times(iso: str):
+    """Devuelve (hora_colombia, hora_utc) desde una fecha ISO en UTC."""
+    if not iso:
+        return "", ""
+    try:
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        utc = dt.astimezone(timezone.utc).strftime("%H:%M")
+        col = dt.astimezone(_COL).strftime("%H:%M")
+        return col, utc
+    except Exception:
+        return "", ""
 
 
 def _pct(x):
@@ -25,21 +41,37 @@ def format_match(meta: dict, a: dict) -> str:
     ca, cb = a["career"]["a"], a["career"]["b"]
     fa, fb = a["recent_form"]["a"], a["recent_form"]["b"]
     h = a["h2h"]
-    hora = (meta.get("date") or "")[11:16]
+    col, utc = _times(meta.get("date"))
+    tipo = meta.get("match_type")  # 2x4 / 2x5 / 2x6 (si se conoce)
 
     rel = _reliability(h["matches"], fa.get("games", 0), fb.get("games", 0))
 
-    msg = (
-        f"⚽ <b>eSoccer — {html.escape(A)} vs {html.escape(B)}</b>"
-        + (f"  · {hora} UTC" if hora else "") + "\n"
-        f"🏳️ {html.escape(str(meta.get('team1','?')))} vs {html.escape(str(meta.get('team2','?')))}\n"
-        f"\n"
-        f"📊 <b>Score {html.escape(A)}: {a['score_a']}/100</b>  (se inclina: {html.escape(str(a['favored']))})\n"
+    # Score del FAVORITO: si score_a<50, el favorito es B y su score es 100-score_a.
+    score_a = a["score_a"]
+    if score_a > 50:
+        fav, fav_score = A, score_a
+    elif score_a < 50:
+        fav, fav_score = B, 100 - score_a
+    else:
+        fav, fav_score = None, 50
+
+    titulo = f"⚽ <b>eSoccer{f' ({tipo})' if tipo else ''} — {html.escape(A)} vs {html.escape(B)}</b>"
+    reloj = ""
+    if col:
+        reloj = f"  · {col} COL ({utc} UTC)"
+    if fav:
+        linea_score = (f"📊 <b>Favorito: {html.escape(fav)} — Score {fav_score}/100</b>\n")
+    else:
+        linea_score = "📊 <b>Parejo (50/50)</b>\n"
+
+    teams = f"🏳️ {html.escape(str(meta.get('team1','?')))} vs {html.escape(str(meta.get('team2','?')))}\n"
+    cuerpo = (
         f"👤 Carrera win%: {A} {_pct(ca['win_rate'])} · {B} {_pct(cb['win_rate'])}\n"
         f"📈 Forma reciente (gol/partido): {A} {_num(fa['gf_per_game'])}⚽/{_num(fa['ga_per_game'])}🥅 · "
         f"{B} {_num(fb['gf_per_game'])}⚽/{_num(fb['ga_per_game'])}🥅\n"
         f"⚔️ H2H ({h['matches']}): {A} {h['a_win']}-{h['draw']}-{h['b_win']} {B}\n"
     )
+    msg = titulo + reloj + "\n" + teams + "\n" + linea_score + cuerpo
     if h["matches"]:
         msg += (
             f"⚽ Goles H2H: prom <b>{_num(h['avg_total_goals'])}</b> · "
