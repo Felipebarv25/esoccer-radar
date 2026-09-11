@@ -8,5 +8,6 @@ __pycache__/
 venv/
 *.log
 
-# Datos de análisis (viven en el servidor; no se versionan)
+# Datos de análisis y estado (viven en el servidor; no se versionan)
 data/
+reports_state.json

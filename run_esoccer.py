@@ -14,6 +14,7 @@ import time
 import backtest
 import config
 import persistence
+import reports
 from esb_source import ESBSource, match_pairs
 from esb_score import analyze_match
 from formatter import format_match
@@ -71,6 +72,12 @@ def main():
             pending = backtest.process(source, notifier, pending)
         except Exception as e:
             print(f"[WARN] backtest.process: {e}", file=sys.stderr)
+
+        # Reportes programados de tasa de acierto (diario/semanal/quincenal/mensual).
+        try:
+            reports.maybe_send(notifier)
+        except Exception as e:
+            print(f"[WARN] reports.maybe_send: {e}", file=sys.stderr)
 
         if nuevos:
             print(f"[ciclo] {len(pairs)} próximos · {nuevos} nuevos · pendientes {len(pending)}",
