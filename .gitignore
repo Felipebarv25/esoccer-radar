@@ -1,0 +1,12 @@
+# Secretos: JAMÁS subir (las claves van en .env local / servidor)
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.log
+
+# Datos de análisis (viven en el servidor; no se versionan)
+data/
