@@ -14,11 +14,23 @@ Datos que expone:
 NOTA HONESTA: esto son DATOS FACTUALES, no pronósticos ni probabilidades.
 """
 import time
+from datetime import datetime, timedelta, timezone
 
 import requests
 
 BASE = "https://football.esportsbattle.com/api"
 _FINISHED_TOURNAMENT = 3  # status_id de torneo terminado (tiene resultados)
+_SCHEDULED_MATCH = 1      # status_id de partido programado (aún no empieza)
+
+
+def match_type(token: str) -> str:
+    """Tipo de partido según el nombre del torneo/liga. Sin número = 2x4 (8 min)."""
+    t = token or ""
+    if "2x6" in t:
+        return "2x6"
+    if "2x5" in t:
+        return "2x5"
+    return "2x4"
 
 
 class ESBSource:
@@ -53,8 +65,50 @@ class ESBSource:
 
     # ---- endpoints ----
     def nearest_matches(self) -> list:
-        """Próximos partidos programados (lista)."""
+        """Próximos partidos programados (lista) — SOLO 2x4. Legacy."""
         return self._get("/tournaments/nearest-matches")
+
+    def upcoming_matches(self, lookahead_min: int = 25,
+                         back_hours: int = 1, fwd_hours: int = 3) -> list:
+        """Próximos partidos de TODOS los tipos (2x4/2x5/2x6), con etiqueta de tipo.
+
+        Recorre los torneos activos/próximos y saca sus partidos programados que
+        empiezan dentro de los próximos `lookahead_min` minutos. Cada partido lleva
+        `_type` (2x4/2x5/2x6). Los partidos de cada torneo se cachean.
+        """
+        now = datetime.now(timezone.utc)
+        cutoff = now + timedelta(minutes=lookahead_min)
+        date_from = (now - timedelta(hours=back_hours)).strftime("%Y/%m/%d %H:%M")
+        date_to = (now + timedelta(hours=fwd_hours)).strftime("%Y/%m/%d %H:%M")
+
+        out, page, total_pages = [], 1, 1
+        while page <= total_pages and page <= 5:
+            data = self._get("/tournaments", params={
+                "page": page, "dateFrom": date_from, "dateTo": date_to})
+            total_pages = data.get("totalPages", 1)
+            for t in data.get("tournaments", []):
+                if t.get("status_id") == _FINISHED_TOURNAMENT:
+                    continue
+                ttype = match_type(t.get("token_international"))
+                tid = t["id"]
+                tm = self._cached(
+                    f"tmatches:{tid}",
+                    lambda i=tid: self._get(f"/tournaments/{i}/matches"))
+                matches = tm if isinstance(tm, list) else (tm.get("matches") or [])
+                for m in matches:
+                    if m.get("status_id") != _SCHEDULED_MATCH:
+                        continue
+                    try:
+                        md = datetime.fromisoformat((m.get("date") or "").replace("Z", "+00:00"))
+                    except Exception:
+                        continue
+                    if now <= md <= cutoff:
+                        m["_type"] = ttype
+                        out.append(m)
+            page += 1
+        # ordenar por fecha
+        out.sort(key=lambda m: m.get("date") or "")
+        return out
 
     def participant(self, nickname: str) -> dict:
         """Récord de carrera de un jugador."""
@@ -128,6 +182,7 @@ def match_pairs(nearest: list) -> list:
             "team1": (p1.get("team") or {}).get("token_international"),
             "player2": p2.get("nickname"),
             "team2": (p2.get("team") or {}).get("token_international"),
+            "match_type": m.get("_type"),
         })
     return out
 

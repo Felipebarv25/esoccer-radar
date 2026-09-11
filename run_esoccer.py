@@ -39,7 +39,7 @@ def main():
 
     while True:
         try:
-            pairs = match_pairs(source.nearest_matches())
+            pairs = match_pairs(source.upcoming_matches())
         except Exception as e:
             print(f"[WARN] fallo al listar próximos: {e}", file=sys.stderr)
             time.sleep(interval)
