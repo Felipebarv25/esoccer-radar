@@ -8,6 +8,9 @@ load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+# Canal SOLO para reportes (tasa de acierto + Excel). Si no se define, usa el
+# mismo canal principal.
+TELEGRAM_REPORTS_CHAT_ID = os.getenv("TELEGRAM_REPORTS_CHAT_ID", "").strip() or TELEGRAM_CHAT_ID
 # Cada cuánto se consulta la lista de próximos partidos.
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
 

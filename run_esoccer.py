@@ -30,7 +30,8 @@ def main():
     config.validate()
 
     source = ESBSource()
-    notifier = TelegramNotifier()
+    notifier = TelegramNotifier()                                  # canal de análisis
+    reports_notifier = TelegramNotifier(chat_id=config.TELEGRAM_REPORTS_CHAT_ID)  # canal de reportes
     seen = persistence.already_saved_ids()   # no re-avisar los ya guardados
     pending = persistence.load_open()        # partidos alertados sin desenlace aún
 
@@ -73,10 +74,10 @@ def main():
         except Exception as e:
             print(f"[WARN] backtest.process: {e}", file=sys.stderr)
 
-        # Reportes programados de tasa de acierto (diario/semanal/quincenal/mensual).
+        # Reportes programados (van al canal de reportes, no al de análisis).
         try:
-            reports.maybe_send(notifier)
-            reports.maybe_team_report(notifier)  # CSV jugador-equipo cada 2 días
+            reports.maybe_send(reports_notifier)
+            reports.maybe_team_report(reports_notifier)  # CSV jugador-equipo cada 2 días
         except Exception as e:
             print(f"[WARN] reports: {e}", file=sys.stderr)
 
