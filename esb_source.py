@@ -78,13 +78,39 @@ class ESBSource:
         """
         now = datetime.now(timezone.utc)
         cutoff = now + timedelta(minutes=lookahead_min)
+
+        def in_window(iso):
+            try:
+                md = datetime.fromisoformat((iso or "").replace("Z", "+00:00"))
+            except Exception:
+                return False
+            return now <= md <= cutoff
+
+        by_id = {}
+        # 1) nearest-matches: feed CONFIABLE de los partidos inmediatos (sesión en
+        #    curso). El endpoint /tournaments NO devuelve torneos en progreso, así
+        #    que sin esto se perderían los partidos que ya vienen. Tipo por defecto
+        #    2x4 (es lo que trae este feed) salvo que el otro feed lo etiquete.
+        try:
+            for m in self.nearest_matches():
+                if in_window(m.get("date")):
+                    m.setdefault("_type", "2x4")
+                    by_id[m["id"]] = m
+        except Exception:
+            pass
+
+        # 2) tournaments-feed: agrega los 2x5/2x6 y próximos (torneos programados),
+        #    con su tipo real. Si un partido ya vino por nearest, aquí se corrige su
+        #    tipo.
         date_from = (now - timedelta(hours=back_hours)).strftime("%Y/%m/%d %H:%M")
         date_to = (now + timedelta(hours=fwd_hours)).strftime("%Y/%m/%d %H:%M")
-
-        out, page, total_pages = [], 1, 1
+        page, total_pages = 1, 1
         while page <= total_pages and page <= 5:
-            data = self._get("/tournaments", params={
-                "page": page, "dateFrom": date_from, "dateTo": date_to})
+            try:
+                data = self._get("/tournaments", params={
+                    "page": page, "dateFrom": date_from, "dateTo": date_to})
+            except Exception:
+                break
             total_pages = data.get("totalPages", 1)
             for t in data.get("tournaments", []):
                 if t.get("status_id") == _FINISHED_TOURNAMENT:
@@ -98,16 +124,12 @@ class ESBSource:
                 for m in matches:
                     if m.get("status_id") != _SCHEDULED_MATCH:
                         continue
-                    try:
-                        md = datetime.fromisoformat((m.get("date") or "").replace("Z", "+00:00"))
-                    except Exception:
-                        continue
-                    if now <= md <= cutoff:
+                    if in_window(m.get("date")):
                         m["_type"] = ttype
-                        out.append(m)
+                        by_id[m["id"]] = m
             page += 1
-        # ordenar por fecha
-        out.sort(key=lambda m: m.get("date") or "")
+
+        out = sorted(by_id.values(), key=lambda m: m.get("date") or "")
         return out
 
     def participant(self, nickname: str) -> dict:
