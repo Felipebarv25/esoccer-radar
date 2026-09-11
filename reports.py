@@ -338,6 +338,25 @@ def text_top_players(label: str, since_utc, min_n: int = 2, top: int = 10) -> st
     return _join([bloque, _NOTA])
 
 
+def text_worst_players(label: str, since_utc, min_n: int = 2, top: int = 10) -> str:
+    """Peores jugadores (menor win% real) en un periodo. Para /peores."""
+    since_col = since_utc.astimezone(_COL)
+    views = analytics.load_views()
+    win = analytics.in_window(views, since_col, datetime.now(_COL) + timedelta(minutes=1))
+    rows = analytics.player_perf(win, min_n=min_n)
+    # peor primero: menor win%; a igualdad, muestra más grande (más confiable)
+    rows = sorted(rows, key=lambda r: (r["wr"], -r["n"]))
+    if not rows:
+        return _join([f"📉 <b>Peores jugadores {label}</b>\n"
+                      f"Sin datos suficientes aún (mínimo {min_n} partidos por jugador).",
+                      _NOTA])
+    lineas = [f"📉 <b>Peores jugadores {label}</b>"]
+    for r in rows[:top]:
+        gpg = f" · {r['gpg']} GF/p" if r.get("gpg") is not None else ""
+        lineas.append(f"• {r['name']} — {r['wr']}% ({r['w']}/{r['n']}){gpg}")
+    return _join(["\n".join(lineas), _NOTA])
+
+
 def maybe_team_report(notifier) -> None:
     """Cada 2 días, a las 18:00 COL, genera y envía el CSV jugador-equipo (#5c).
 

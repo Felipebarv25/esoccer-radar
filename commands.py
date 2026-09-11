@@ -28,9 +28,8 @@ _HELP = (
     "/semana — tasa de acierto (últimos 7 días)\n"
     "/quincena — tasa (últimos 15 días)\n"
     "/mes — tasa (últimos 30 días)\n"
-    "/jugadores — mejores jugadores del día\n"
-    "/jugadores semana — mejores de la semana\n"
-    "/jugadores mes — mejores del mes\n"
+    "/jugadores [semana|quincena|mes] — mejores jugadores\n"
+    "/peores [semana|quincena|mes] — peores jugadores\n"
     "/excel — Excel jugador-equipo al momento\n"
     "/ayuda — esta lista\n\n"
     "📢 Puedes escribir estos comandos <b>directamente en el canal de "
@@ -82,25 +81,48 @@ def _texts_for(cmd, arg=""):
         return "text", [reports.text_rate("del mes", reports.since_days_utc(30))]
     if cmd in ("excel", "csv"):
         return "excel", None
-    # mejores jugadores por periodo: /jugadores [dia|semana|mes] (o alias juntos)
+    # ranking de jugadores por periodo (mejores o peores)
+    fn = periodo = None
     if cmd in ("jugadores", "mejores", "players"):
-        periodo = arg or "dia"
+        fn, periodo = reports.text_top_players, (arg or "dia")
     elif cmd in ("jugadoresdia", "jugadoreshoy"):
-        periodo = "dia"
+        fn, periodo = reports.text_top_players, "dia"
     elif cmd in ("jugadoressemana",):
-        periodo = "semana"
+        fn, periodo = reports.text_top_players, "semana"
+    elif cmd in ("jugadoresquincena",):
+        fn, periodo = reports.text_top_players, "quincena"
     elif cmd in ("jugadoresmes",):
-        periodo = "mes"
+        fn, periodo = reports.text_top_players, "mes"
+    elif cmd in ("peores", "worst"):
+        fn, periodo = reports.text_worst_players, (arg or "dia")
+    elif cmd in ("peoresdia", "peoreshoy"):
+        fn, periodo = reports.text_worst_players, "dia"
+    elif cmd in ("peoressemana",):
+        fn, periodo = reports.text_worst_players, "semana"
+    elif cmd in ("peoresquincena",):
+        fn, periodo = reports.text_worst_players, "quincena"
+    elif cmd in ("peoresmes",):
+        fn, periodo = reports.text_worst_players, "mes"
     else:
         return "unknown", None
-    if periodo in ("semana", "week"):
-        return "text", [reports.text_top_players("de la semana",
-                                                 reports.since_days_utc(7), min_n=3)]
-    if periodo in ("mes", "month"):
-        return "text", [reports.text_top_players("del mes",
-                                                 reports.since_days_utc(30), min_n=3)]
-    return "text", [reports.text_top_players("del día",
-                                             reports.since_today_utc(), min_n=2)]
+    return "text", [_ranking(fn, periodo)]
+
+
+# (label, since_utc, min_n) por periodo — mín. muestra más alto a mayor ventana
+_PERIODOS = {
+    "dia": ("del día", lambda: reports.since_today_utc(), 2),
+    "day": ("del día", lambda: reports.since_today_utc(), 2),
+    "semana": ("de la semana", lambda: reports.since_days_utc(7), 3),
+    "week": ("de la semana", lambda: reports.since_days_utc(7), 3),
+    "quincena": ("de la quincena", lambda: reports.since_days_utc(15), 3),
+    "mes": ("del mes", lambda: reports.since_days_utc(30), 4),
+    "month": ("del mes", lambda: reports.since_days_utc(30), 4),
+}
+
+
+def _ranking(fn, periodo):
+    label, since_fn, min_n = _PERIODOS.get(periodo, _PERIODOS["dia"])
+    return fn(label, since_fn(), min_n=min_n)
 
 
 def _deliver(target_chat, kind, payload):
