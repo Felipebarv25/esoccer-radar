@@ -11,6 +11,7 @@ import argparse
 import sys
 import time
 
+import backtest
 import config
 import persistence
 from esb_source import ESBSource, match_pairs
@@ -29,7 +30,8 @@ def main():
 
     source = ESBSource()
     notifier = TelegramNotifier()
-    seen = persistence.already_saved_ids()  # no re-avisar los ya guardados
+    seen = persistence.already_saved_ids()   # no re-avisar los ya guardados
+    pending = persistence.load_open()        # partidos alertados sin desenlace aún
 
     interval = config.POLL_INTERVAL_SECONDS
     print(f"eSoccer Radar — intervalo {interval}s · ya guardados: {len(seen)}")
@@ -57,14 +59,22 @@ def main():
                 print(f"[WARN] no pude analizar {p['player1']} vs {p['player2']}: {e}",
                       file=sys.stderr)
                 continue
-            persistence.save_analysis(p, a)
-            ok = notifier.send(format_match(p, a))
+            msg_id = notifier.send(format_match(p, a))   # enviar primero → obtener message_id
+            rec = persistence.save_analysis(p, a, message_id=msg_id)
+            pending.append(rec)
             nuevos += 1
             print(f"[MATCH] {p['player1']} vs {p['player2']} → score {a['score_a']} "
-                  f"| Telegram {'OK' if ok else 'FALLÓ'}", file=sys.stderr)
+                  f"| Telegram {'OK' if msg_id else 'FALLÓ'}", file=sys.stderr)
+
+        # Cerrar los partidos que ya terminaron (backtesting: ✅/❌ bajo la alerta).
+        try:
+            pending = backtest.process(source, notifier, pending)
+        except Exception as e:
+            print(f"[WARN] backtest.process: {e}", file=sys.stderr)
 
         if nuevos:
-            print(f"[ciclo] {len(pairs)} próximos · {nuevos} nuevos analizados", file=sys.stderr)
+            print(f"[ciclo] {len(pairs)} próximos · {nuevos} nuevos · pendientes {len(pending)}",
+                  file=sys.stderr)
 
         # Limpieza de memoria: mantener 'seen' acotado a los últimos ~2000 ids.
         if len(seen) > 3000:

@@ -127,6 +127,35 @@ class ESBSource:
         return self._get(f"/participants/{nick_a}/compare/{nick_b}/matches",
                           params={"page": page})
 
+    def match_result(self, nick_a: str, nick_b: str, match_id) -> dict:
+        """Busca el resultado REAL de un partido ya jugado (marcador + ganador).
+
+        Devuelve None si aún no tiene marcador (no ha terminado o hay lag).
+        {a, sa, b, sb, winner} donde winner es el nickname ganador o None (empate).
+        """
+        for page in (1, 2):
+            data = self.compare_matches(nick_a, nick_b, page=page)
+            for m in data.get("matches", []):
+                if str(m.get("id")) != str(match_id):
+                    continue
+                p1, p2 = m.get("participant1", {}), m.get("participant2", {})
+                s1, s2 = p1.get("score"), p2.get("score")
+                if s1 is None or s2 is None:
+                    return None  # sin marcador todavía
+                # normalizar a A/B por nickname
+                if p1.get("nickname") == nick_a:
+                    sa, sb = s1, s2
+                else:
+                    sa, sb = s2, s1
+                if sa > sb:
+                    winner = nick_a
+                elif sb > sa:
+                    winner = nick_b
+                else:
+                    winner = None
+                return {"a": nick_a, "sa": sa, "b": nick_b, "sb": sb, "winner": winner}
+        return None
+
     def participant_tournaments(self, nickname: str, page: int = 1) -> dict:
         return self._get(f"/participants/{nickname}/tournaments", params={"page": page})
 
