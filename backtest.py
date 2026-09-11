@@ -73,6 +73,7 @@ def process(source, notifier, pending: list) -> list:
 
         persistence.set_result(rec, {
             "score": f"{result['a']} {result['sa']}-{result['sb']} {result['b']}",
+            "sa": result["sa"], "sb": result["sb"],   # marcador numérico (p1, p2)
             "winner": result["winner"], "favored": fav,
             "outcome": outcome, "hit": hit, "closed_at": now.isoformat(),
         })

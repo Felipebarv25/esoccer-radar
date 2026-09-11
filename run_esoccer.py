@@ -83,8 +83,9 @@ def main():
 
         # Reportes programados (van al canal de reportes, no al de análisis).
         try:
-            reports.maybe_send(reports_notifier)
-            reports.maybe_team_report(reports_notifier)  # CSV jugador-equipo cada 2 días
+            reports.maybe_hourly(reports_notifier)       # resumen de cada hora
+            reports.maybe_send(reports_notifier)          # tasa + análisis profundo diario
+            reports.maybe_team_report(reports_notifier)   # CSV jugador-equipo cada 2 días
         except Exception as e:
             print(f"[WARN] reports: {e}", file=sys.stderr)
 

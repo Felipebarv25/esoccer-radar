@@ -13,6 +13,8 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 
+import analytics
+
 _COL = timezone(timedelta(hours=-5))
 _DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "matches")
 _STATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reports_state.json")
@@ -107,10 +109,15 @@ def maybe_send(notifier) -> None:
     month = now.strftime("%Y-%m")
     sent = False
 
-    # Diario 18:00
+    # Diario 18:00 — tasa del día + análisis profundo
     if now.hour >= 18 and st.get("daily") != day:
         since = now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
         notifier.send(_format("del día", hit_stats(since)))
+        try:
+            _send_daily_deep(notifier)
+        except Exception as e:
+            import sys
+            print(f"[WARN] daily_deep: {e}", file=sys.stderr)
         st["daily"] = day; sent = True
 
     # Semanal domingo 12:00 (weekday: lunes=0 ... domingo=6)
@@ -133,6 +140,161 @@ def maybe_send(notifier) -> None:
 
     if sent:
         _save_state(st)
+
+
+# ==================== reportes analíticos ====================
+_NOTA = ("<i>Datos observados de lo ya jugado — NO probabilidad ni rentabilidad. "
+         "Con muestras chicas no es concluyente.</i>")
+
+
+def _fmt_scoreboard(sb: dict) -> str:
+    if sb["analizados"] == 0:
+        return "Sin partidos analizados en esta franja."
+    linea1 = (f"Partidos analizados: <b>{sb['analizados']}</b>\n"
+              f"✅ {sb['acierto']} aciertos · ❌ {sb['fallo']} fallos · "
+              f"➖ {sb['empate']} empates · ⚪ {sb['parejo']} parejos")
+    if sb["pendiente"]:
+        linea1 += f" · ⏳ {sb['pendiente']} sin cerrar"
+    partes = [linea1]
+    if sb["conpick"]:
+        partes.append(f"🎯 <b>Tasa estricta: {sb['tasa_estricta']}%</b> "
+                      f"(favorito ganó; empate = no-acierto, sobre {sb['conpick']})")
+    if sb["decididos"]:
+        partes.append(f"   Tasa entre decididos: {sb['tasa_decididos']}% "
+                      f"(sobre {sb['decididos']} con ganador)")
+    return "\n".join(partes)
+
+
+def _fmt_players(rows, titulo, top=5) -> str:
+    if not rows:
+        return ""
+    lineas = [f"🏅 <b>{titulo}</b>"]
+    for r in rows[:top]:
+        gpg = f" · {r['gpg']} GF/p" if r.get("gpg") is not None else ""
+        lineas.append(f"• {r['name']} — {r['wr']}% ({r['w']}/{r['n']}){gpg}")
+    return "\n".join(lineas)
+
+
+def _fmt_teams(rows, titulo, top=5) -> str:
+    if not rows:
+        return ""
+    lineas = [f"🛡️ <b>{titulo}</b>"]
+    for r in rows[:top]:
+        lineas.append(f"• {r['name']} — {r['wr']}% ({r['w']}/{r['n']})")
+    return "\n".join(lineas)
+
+
+def _fmt_player_team(rows, top=6) -> str:
+    if not rows:
+        return ""
+    lineas = ["🎮 <b>Jugador + equipo destacados</b>"]
+    for r in rows[:top]:
+        lineas.append(f"• {r['player']} con {r['team']} — {r['wr']}% ({r['w']}/{r['n']})")
+    return "\n".join(lineas)
+
+
+def _fmt_goals(g) -> str:
+    if not g:
+        return ""
+    return (f"⚽ <b>Goles (realizado, {g['n']} part.)</b>\n"
+            f"Promedio {g['avg']}/partido · Over 2.5: {g['over25']}% · "
+            f"Over 3.5: {g['over35']}% · Ambos anotan: {g['btts']}%")
+
+
+def _fmt_calibration(rows) -> str:
+    if not rows:
+        return ""
+    lineas = ["📐 <b>Calibración del score</b> (¿a más fuerza, más acierto?)"]
+    for r in rows:
+        lineas.append(f"• Score {r['banda']} → acierta {r['tasa']}% (n={r['n']})")
+    lineas.append("<i>Si la tasa sube con la banda, el score aporta señal.</i>")
+    return "\n".join(lineas)
+
+
+def _fmt_weekday(rows) -> str:
+    if not rows:
+        return ""
+    lineas = ["📅 <b>Por día de la semana</b> (exploratorio)"]
+    for r in rows:
+        lineas.append(f"• {r['dia']}: {r['tasa']}% (n={r['n']})")
+    return "\n".join(lineas)
+
+
+def _fmt_hourband(rows, top=6) -> str:
+    if not rows:
+        return ""
+    lineas = ["🕐 <b>Franjas horarias más certeras</b> (exploratorio)"]
+    for r in rows[:top]:
+        lineas.append(f"• {r['franja']}: {r['tasa']}% (n={r['n']})")
+    return "\n".join(lineas)
+
+
+def _join(bloques) -> str:
+    return "\n\n".join(b for b in bloques if b)
+
+
+def maybe_hourly(notifier) -> None:
+    """Cada hora (a los ~12 min) envía el resumen de la hora COMPLETA anterior.
+
+    Se espera al minuto 12 para que los partidos de esa hora ya hayan cerrado
+    (backtest cierra ~12 min tras el inicio). Ventana por hora de INICIO.
+    """
+    now = datetime.now(_COL)
+    if now.minute < 12:
+        return
+    win_end = now.replace(minute=0, second=0, microsecond=0)
+    win_start = win_end - timedelta(hours=1)
+    label = win_start.strftime("%Y-%m-%d-%H")
+    st = _load_state()
+    if st.get("hourly") == label:
+        return
+
+    views = analytics.load_views()
+    ventana = analytics.in_window(views, win_start, win_end)
+    sb = analytics.scoreboard(ventana)
+    # Si no hubo partidos en esa hora (madrugada), no mandamos ruido; marcamos
+    # el estado para no reintentar esa ventana.
+    if sb["analizados"] == 0:
+        st["hourly"] = label
+        _save_state(st)
+        return
+    cab = (f"🕐 <b>Reporte {win_start:%H:%M}–{win_end:%H:%M}</b> "
+           f"(hora Colombia, {win_start:%d/%m})")
+    bloques = [
+        cab,
+        _fmt_scoreboard(sb),
+        _fmt_players(analytics.player_perf(ventana, min_n=1),
+                     "Mejores jugadores de la hora", top=5),
+        _fmt_goals(analytics.goals_summary(ventana)),
+        _NOTA,
+    ]
+    notifier.send(_join(bloques))
+    st["hourly"] = label
+    _save_state(st)
+
+
+def _send_daily_deep(notifier) -> None:
+    """Análisis profundo del día (jugadores, equipos, calibración, tendencias)."""
+    now = datetime.now(_COL)
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    views = analytics.load_views()
+    hoy = analytics.in_window(views, day_start, now + timedelta(minutes=1))
+
+    cab = f"🔎 <b>Análisis profundo del día</b> — {now:%d/%m/%Y}"
+    bloques = [
+        cab,
+        # del día
+        _fmt_players(analytics.player_perf(hoy, min_n=2), "Mejores jugadores del día"),
+        _fmt_teams(analytics.team_perf(hoy, min_n=2), "Mejores equipos del día"),
+        _fmt_player_team(analytics.player_team(hoy, min_n=2)),
+        _fmt_goals(analytics.goals_summary(hoy)),
+        # histórico (más muestra) — señal y tendencias
+        _fmt_calibration(analytics.score_calibration(views)),
+        _fmt_weekday(analytics.weekday_board(views)),
+        _fmt_hourband(analytics.hour_board(views, min_n=3)),
+        _NOTA,
+    ]
+    notifier.send(_join(bloques))
 
 
 def maybe_team_report(notifier) -> None:
