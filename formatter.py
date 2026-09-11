@@ -35,8 +35,12 @@ def _reliability(h2h_matches, form_games_a, form_games_b) -> str:
     return "🔴 muestra pequeña — tómalo con pinzas"
 
 
-def format_match(meta: dict, a: dict) -> str:
-    """meta: {player1,team1,player2,team2,date}. a: analyze_match(...)."""
+def format_match(meta: dict, a: dict, edges: list = None) -> str:
+    """meta: {player1,team1,player2,team2,date}. a: analyze_match(...).
+
+    `edges`: ventajas históricas detectadas (analytics.detect_edges); si hay,
+    se muestran en un bloque 🔥 destacado arriba de la tarjeta.
+    """
     A, B = a["player_a"], a["player_b"]
     ca, cb = a["career"]["a"], a["career"]["b"]
     fa, fb = a["recent_form"]["a"], a["recent_form"]["b"]
@@ -71,7 +75,12 @@ def format_match(meta: dict, a: dict) -> str:
         f"{B} {_num(fb['gf_per_game'])}⚽/{_num(fb['ga_per_game'])}🥅\n"
         f"⚔️ H2H ({h['matches']}): {A} {h['a_win']}-{h['draw']}-{h['b_win']} {B}\n"
     )
-    msg = titulo + reloj + "\n" + teams + "\n" + linea_score + cuerpo
+    bloque_edge = ""
+    if edges:
+        bloque_edge = ("🚨 <b>ON FIRE</b> (según nuestros datos)\n"
+                       + "\n".join(edges) + "\n\n")
+
+    msg = titulo + reloj + "\n" + teams + "\n" + bloque_edge + linea_score + cuerpo
     if h["matches"]:
         msg += (
             f"⚽ Goles H2H: prom <b>{_num(h['avg_total_goals'])}</b> · "

@@ -11,6 +11,7 @@ import argparse
 import sys
 import time
 
+import analytics
 import backtest
 import config
 import persistence
@@ -57,6 +58,7 @@ def main():
             continue
 
         nuevos = 0
+        edge_views = None   # stats acumuladas, se cargan una vez por ciclo (perezoso)
         for p in pairs:
             mid = str(p.get("match_id"))
             if mid in seen or not p.get("player1") or not p.get("player2"):
@@ -68,7 +70,21 @@ def main():
                 print(f"[WARN] no pude analizar {p['player1']} vs {p['player2']}: {e}",
                       file=sys.stderr)
                 continue
-            msg_id = notifier.send(format_match(p, a))   # enviar primero → obtener message_id
+            # Ventajas históricas ("on fire") desde nuestros datos acumulados.
+            edges = []
+            try:
+                if edge_views is None:
+                    edge_views = analytics.load_views()
+                hora = None
+                sc = analytics._parse(p.get("date"))
+                if sc:
+                    hora = sc.astimezone(analytics._COL).hour
+                edges = analytics.detect_edges(
+                    edge_views, p["player1"], p.get("team1"),
+                    p["player2"], p.get("team2"), hora)
+            except Exception as e:
+                print(f"[WARN] detect_edges {mid}: {e}", file=sys.stderr)
+            msg_id = notifier.send(format_match(p, a, edges=edges))   # enviar primero → obtener message_id
             rec = persistence.save_analysis(p, a, message_id=msg_id)
             pending.append(rec)
             nuevos += 1

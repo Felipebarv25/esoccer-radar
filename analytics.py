@@ -234,6 +234,65 @@ def score_calibration(views):
     return out
 
 
+# ---------- detección de ventajas pre-partido ("on fire") ----------
+def _player_history(views, player):
+    """Partidos CERRADOS de un jugador: (start_col, won, team, opp, hour)."""
+    out = []
+    for v in views:
+        if v["outcome"] not in _CONPICK:
+            continue
+        if v["p1"] == player:
+            out.append((v["start_col"], v["winner"] == player, v["t1"], v["p2"]))
+        elif v["p2"] == player:
+            out.append((v["start_col"], v["winner"] == player, v["t2"], v["p1"]))
+    out.sort(key=lambda r: (r[0] or datetime.min.replace(tzinfo=_COL)))
+    return out
+
+
+def _rate(rows):
+    n = len(rows)
+    w = sum(1 for r in rows if r[1])
+    return n, w, (round(100 * w / n) if n else 0)
+
+
+def detect_edges(views, p1, t1, p2, t2, hour,
+                 min_team=4, min_h2h=3, min_hour=6, min_form=5, min_wr=70):
+    """Ventajas históricas (de NUESTROS datos) para un partido que va a empezar.
+
+    Devuelve lista de strings ya formateados. Solo incluye lo que supera el
+    candado de muestra + porcentaje (para no inventar 'on fire' con 1 partido).
+    """
+    edges = []
+    for player, team, opp in ((p1, t1, p2), (p2, t2, p1)):
+        if not player:
+            continue
+        hist = _player_history(views, player)
+        if not hist:
+            continue
+        # con ese equipo
+        if team:
+            n, w, wr = _rate([r for r in hist if r[2] == team])
+            if n >= min_team and wr >= min_wr:
+                edges.append(f"🔥 <b>{player}</b> rinde con {team}: {wr}% ({w}/{n})")
+        # contra ese rival
+        if opp:
+            n, w, wr = _rate([r for r in hist if r[3] == opp])
+            if n >= min_h2h and wr >= min_wr:
+                edges.append(f"⚔️ <b>{player}</b> domina a {opp}: {w}-{n - w} ({wr}%)")
+        # en esa franja horaria
+        if hour is not None:
+            n, w, wr = _rate([r for r in hist
+                              if r[0] is not None and r[0].hour == hour])
+            if n >= min_hour and wr >= min_wr:
+                edges.append(f"⏰ <b>{player}</b> fuerte a las {hour:02d}:00: {wr}% ({w}/{n})")
+        # en racha (últimos N)
+        recientes = hist[-6:]
+        n, w, wr = _rate(recientes)
+        if n >= min_form and wr >= min_wr:
+            edges.append(f"📈 <b>{player}</b> en racha: {w}/{n} recientes")
+    return edges
+
+
 def goals_summary(views):
     """Sesgo de goles realizado: promedio, Over 2.5/3.5, ambos anotan (BTTS)."""
     n = tot = over25 = over35 = btts = 0
