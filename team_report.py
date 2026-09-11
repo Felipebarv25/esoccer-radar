@@ -8,12 +8,16 @@ TERMINADOS de los últimos días y agrega, por (jugador, equipo): partidos, W/D/
 HONESTO: por (jugador, equipo) la muestra suele ser pequeña. Cada fila trae su
 número de partidos para que sepas cuánto pesa; pocas partidas = anecdótico.
 """
+import concurrent.futures
 import csv
 import glob
 import json
 import os
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+
+import requests
 
 import analytics
 from esb_source import ESBSource, _FINISHED_TOURNAMENT
@@ -37,31 +41,72 @@ def alerted_players() -> set:
     return players
 
 
+def _results_concurrent(source: ESBSource, tids: list, workers: int = 8) -> dict:
+    """Trae /tournaments/{id}/results de varios torneos EN PARALELO.
+
+    Usa la caché del source (evita re-pedir) y peticiones independientes por hilo
+    (requests.get es thread-safe; no comparte la Session del source).
+    """
+    out, need, now = {}, [], time.time()
+    for tid in tids:
+        hit = source._cache.get(f"tres:{tid}")
+        if hit and now - hit[0] < source.cache_ttl:
+            out[tid] = hit[1]
+        else:
+            need.append(tid)
+
+    headers = dict(source.session.headers)
+
+    def fetch(tid):
+        r = requests.get(f"{source.base}/tournaments/{tid}/results",
+                         headers=headers, timeout=20)
+        r.raise_for_status()
+        return tid, r.json()
+
+    if need:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+            for fut in concurrent.futures.as_completed([ex.submit(fetch, t) for t in need]):
+                try:
+                    tid, data = fut.result()
+                    out[tid] = data
+                    source._cache[f"tres:{tid}"] = (time.time(), data)  # calienta caché
+                except Exception:
+                    pass
+    return out
+
+
 def build(source: ESBSource, players: set, days: int = 3, max_pages: int = 60) -> dict:
     now = datetime.now(timezone.utc)
     df = (now - timedelta(days=days)).strftime("%Y/%m/%d %H:%M")
     dt = now.strftime("%Y/%m/%d %H:%M")
-    agg = defaultdict(lambda: {"games": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0})
-    page, total = 1, 1
+
+    # 1) recorrer las páginas de torneos y juntar los ids de los TERMINADOS
+    tids, page, total = [], 1, 1
     while page <= total and page <= max_pages:
         data = source._get("/tournaments", params={"page": page, "dateFrom": df, "dateTo": dt})
         total = data.get("totalPages", 1)
         for t in data.get("tournaments", []):
-            if t.get("status_id") != _FINISHED_TOURNAMENT:
-                continue
-            res = source.tournament_results(t["id"])
-            for row in (res.get("results") or []):
-                part = row.get("participant") or {}
-                nick = part.get("nickname")
-                if players and nick not in players:
-                    continue
-                team = (part.get("team") or {}).get("token_international", "?")
-                d = row.get("details") or {}
-                a = agg[(nick, team)]
-                a["games"] += d.get("GP", 0); a["w"] += d.get("W", 0)
-                a["d"] += d.get("D", 0); a["l"] += d.get("L", 0)
-                a["gf"] += d.get("GF", 0); a["ga"] += d.get("GA", 0)
+            if t.get("status_id") == _FINISHED_TOURNAMENT:
+                tids.append(t["id"])
         page += 1
+
+    # 2) traer los resultados de todos esos torneos en paralelo
+    results = _results_concurrent(source, tids)
+
+    # 3) agregar por (jugador, equipo)
+    agg = defaultdict(lambda: {"games": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0})
+    for res in results.values():
+        for row in (res.get("results") or []):
+            part = row.get("participant") or {}
+            nick = part.get("nickname")
+            if players and nick not in players:
+                continue
+            team = (part.get("team") or {}).get("token_international", "?")
+            d = row.get("details") or {}
+            a = agg[(nick, team)]
+            a["games"] += d.get("GP", 0); a["w"] += d.get("W", 0)
+            a["d"] += d.get("D", 0); a["l"] += d.get("L", 0)
+            a["gf"] += d.get("GF", 0); a["ga"] += d.get("GA", 0)
     return agg
 
 

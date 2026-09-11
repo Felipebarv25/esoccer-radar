@@ -8,6 +8,7 @@ Seguridad: solo responde al TELEGRAM_OWNER_ID (si está configurado).
 Nota: un bot solo puede tener UN consumidor de getUpdates a la vez; este servicio
 es el único. No usar webhook a la vez.
 """
+import concurrent.futures
 import sys
 import threading
 import time
@@ -20,6 +21,17 @@ import reports
 from telegram_notifier import TelegramNotifier
 
 _API = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}"
+
+# Cada comando se atiende en su propio hilo, para que uno lento (p.ej. /excel)
+# no bloquee a los demás (/ayuda y otros reportes responden al instante).
+_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="cmd")
+
+
+def _safe(fn, *args):
+    try:
+        fn(*args)
+    except Exception as e:
+        print(f"[WARN] comando: {e}", file=sys.stderr)
 
 _HELP = (
     "🤖 <b>eSoccer Radar — comandos</b>\n\n"
@@ -200,7 +212,7 @@ def poll_loop():
                 if cp:
                     text = cp.get("text", "") or ""
                     if text.startswith("/"):
-                        _handle_channel(cp["chat"]["id"], text)
+                        _POOL.submit(_safe, _handle_channel, cp["chat"]["id"], text)
                     continue
                 # comando por chat privado con el bot
                 msg = upd.get("message")
@@ -210,7 +222,7 @@ def poll_loop():
                 if not text.startswith("/"):
                     continue
                 uid = (msg.get("from") or {}).get("id")
-                _handle_private(msg["chat"]["id"], uid, text)
+                _POOL.submit(_safe, _handle_private, msg["chat"]["id"], uid, text)
         except requests.exceptions.RequestException:
             time.sleep(3)  # timeouts del long poll son normales
         except Exception as e:
