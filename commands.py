@@ -30,6 +30,7 @@ _HELP = (
     "/mes — tasa (últimos 30 días)\n"
     "/excel — Excel jugador-equipo al momento\n"
     "/ayuda — esta lista\n\n"
+    "📢 El reporte se publica en el <b>canal de reportes</b>.\n"
     "<i>Datos observados, NO probabilidad ni rentabilidad.</i>"
 )
 
@@ -48,6 +49,13 @@ def _authorized(uid) -> bool:
     return (not owner) or (str(uid) == str(owner))
 
 
+def _post(requester_chat, *textos):
+    """Publica el/los reporte(s) en el canal de reportes y avisa al que pidió."""
+    for t in textos:
+        _send(config.TELEGRAM_REPORTS_CHAT_ID, t)
+    _send(requester_chat, "✅ Enviado al canal de reportes.")
+
+
 def _handle(chat_id, uid, text):
     # normaliza: "/Semana@EsoccerBot argumento" -> "semana"
     cmd = text.strip().split()[0].lstrip("/").split("@")[0].lower()
@@ -61,21 +69,24 @@ def _handle(chat_id, uid, text):
     if cmd in ("start", "help", "ayuda"):
         _send(chat_id, _HELP)
     elif cmd in ("hora", "hour"):
-        _send(chat_id, reports.text_last_hour())
+        _post(chat_id, reports.text_last_hour())
     elif cmd in ("dia", "day"):
-        _send(chat_id, reports.text_rate("del día", reports.since_today_utc()))
-        _send(chat_id, reports.build_daily_deep())
+        _post(chat_id,
+              reports.text_rate("del día", reports.since_today_utc()),
+              reports.build_daily_deep())
     elif cmd in ("semana", "week"):
-        _send(chat_id, reports.text_rate("de la semana", reports.since_days_utc(7)))
+        _post(chat_id, reports.text_rate("de la semana", reports.since_days_utc(7)))
     elif cmd in ("quincena",):
-        _send(chat_id, reports.text_rate("de la quincena", reports.since_days_utc(15)))
+        _post(chat_id, reports.text_rate("de la quincena", reports.since_days_utc(15)))
     elif cmd in ("mes", "month"):
-        _send(chat_id, reports.text_rate("del mes", reports.since_days_utc(30)))
+        _post(chat_id, reports.text_rate("del mes", reports.since_days_utc(30)))
     elif cmd in ("excel", "csv"):
         _send(chat_id, "📁 Generando Excel jugador-equipo, dame unos segundos...")
         try:
             import team_report
-            team_report.generate_and_send(TelegramNotifier(chat_id=chat_id))
+            team_report.generate_and_send(
+                TelegramNotifier(chat_id=config.TELEGRAM_REPORTS_CHAT_ID))
+            _send(chat_id, "✅ Excel enviado al canal de reportes.")
         except Exception as e:
             _send(chat_id, "No pude generar el Excel ahora, intenta luego.")
             print(f"[WARN] /excel: {e}", file=sys.stderr)
