@@ -141,6 +141,9 @@ def poll_loop():
                 cp = upd.get("channel_post")
                 if cp:
                     text = cp.get("text", "") or ""
+                    print(f"[CMD][debug] channel_post chat={cp.get('chat',{}).get('id')} "
+                          f"(esperado {config.TELEGRAM_REPORTS_CHAT_ID}) "
+                          f"text={text[:40]!r}", file=sys.stderr)
                     if text.startswith("/"):
                         _handle_channel(cp["chat"]["id"], text)
                     continue
