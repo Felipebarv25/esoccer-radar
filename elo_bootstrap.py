@@ -14,37 +14,53 @@ sin doble conteo.
 """
 import concurrent.futures
 import sys
+import time
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 
 import requests
 
 import elo
 from esb_source import ESBSource, _FINISHED_TOURNAMENT
-from datetime import datetime, timedelta, timezone
 
 
 def _log(msg):
     print(msg, flush=True)
 
 
-def run(days: int = 30, max_pages: int = 200, workers: int = 8):
+def _get_json(url, headers, params=None, tries=4):
+    """GET con reintentos y respeto a 429 (la API limita ráfagas)."""
+    for i in range(tries):
+        try:
+            r = requests.get(url, headers=headers, params=params, timeout=25)
+            if r.status_code == 429:
+                time.sleep(2 + 2 * i)
+                continue
+            r.raise_for_status()
+            return r.json()
+        except Exception:
+            if i == tries - 1:
+                raise
+            time.sleep(1 + i)
+
+
+def run(days: int = 30, max_pages: int = 400, workers: int = 5):
     source = ESBSource()
     now = datetime.now(timezone.utc)
     df = (now - timedelta(days=days)).strftime("%Y/%m/%d %H:%M")
     dt = now.strftime("%Y/%m/%d %H:%M")
     headers = dict(source.session.headers)
+    turl = f"{source.base}/tournaments"
     _log(f"[BOOT] ventana: últimos {days} días. Buscando torneos...")
 
     def get_page(page):
-        r = requests.get(f"{source.base}/tournaments", headers=headers,
-                         params={"page": page, "dateFrom": df, "dateTo": dt}, timeout=20)
-        r.raise_for_status()
-        return r.json()
+        return _get_json(turl, headers, {"page": page, "dateFrom": df, "dateTo": dt})
 
-    # 1) página 1 → cuántas páginas hay; el resto en PARALELO
+    # 1) página 1 → cuántas páginas hay; el resto en paralelo (moderado + reintentos)
     first = get_page(1)
     total = min(first.get("totalPages", 1), max_pages)
-    _log(f"[BOOT] {total} páginas de torneos. Descargando en paralelo...")
-    pages = [first]
+    _log(f"[BOOT] {total} páginas de torneos. Descargando (workers={workers})...")
+    pages, fallos_pag = [first], 0
     if total > 1:
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
             futs = {ex.submit(get_page, p): p for p in range(2, total + 1)}
@@ -54,20 +70,22 @@ def run(days: int = 30, max_pages: int = 200, workers: int = 8):
                 try:
                     pages.append(fut.result())
                 except Exception:
-                    pass
-                if done % 10 == 0 or done == len(futs):
-                    _log(f"[BOOT]   páginas {done + 1}/{total}")
+                    fallos_pag += 1
+                if done % 20 == 0 or done == len(futs):
+                    _log(f"[BOOT]   páginas {done + 1}/{total} · fallidas {fallos_pag}")
+
+    # diagnóstico: ¿qué status_id trae la API? (3=terminado, 2=próximo, 4=en curso)
+    statuses = Counter(t.get("status_id") for pg in pages
+                       for t in pg.get("tournaments", []))
+    _log(f"[BOOT] torneos por status_id: {dict(statuses)} · páginas fallidas: {fallos_pag}")
 
     tids = [t["id"] for pg in pages for t in pg.get("tournaments", [])
             if t.get("status_id") == _FINISHED_TOURNAMENT]
     _log(f"[BOOT] {len(tids)} torneos terminados. Bajando sus partidos...")
 
-    # 2) bajar los partidos de cada torneo en paralelo
+    # 2) bajar los partidos de cada torneo (paralelo moderado + reintentos)
     def fetch_matches(tid):
-        r = requests.get(f"{source.base}/tournaments/{tid}/matches",
-                         headers=headers, timeout=20)
-        r.raise_for_status()
-        return r.json()
+        return _get_json(f"{source.base}/tournaments/{tid}/matches", headers)
 
     matches = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
