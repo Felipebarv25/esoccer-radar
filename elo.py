@@ -81,8 +81,12 @@ def snapshot(nick_a, nick_b):
             "games_a": ga, "games_b": gb}
 
 
-def record(nick_a, nick_b, winner, match_id=None):
-    """Actualiza el Elo de ambos tras un partido. Idempotente por match_id."""
+def record(nick_a, nick_b, winner, match_id=None, save=True):
+    """Actualiza el Elo de ambos tras un partido. Idempotente por match_id.
+
+    save=False no escribe a disco (para lotes grandes: aplica en memoria y luego
+    llama flush() una sola vez). En vivo se deja save=True.
+    """
     s = _load()
     mid = None if match_id is None else str(match_id)
     if mid is not None and mid in s["done_set"]:
@@ -102,8 +106,14 @@ def record(nick_a, nick_b, winner, match_id=None):
     s["ratings"][nick_b] = {"rating": round(rb2, 2), "games": gb + 1}
     if mid is not None:
         s["done_set"].add(mid)
-    _save()
+    if save:
+        _save()
     return True
+
+
+def flush():
+    """Escribe el estado a disco (para usar tras un lote con save=False)."""
+    _save()
 
 
 def top(n=20, min_games=5):

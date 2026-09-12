@@ -109,13 +109,17 @@ def run(days: int = 30, max_pages: int = 400, workers: int = 5):
             if done % 50 == 0 or done == len(futs):
                 _log(f"[BOOT]   torneos {done}/{len(tids)} · {len(matches)} partidos")
 
-    # 3) aplicar en orden cronológico
+    # 3) aplicar en orden cronológico — EN MEMORIA, guardando UNA vez al final
     matches.sort(key=lambda x: x[0])
+    _log(f"[BOOT] aplicando {len(matches)} partidos al Elo...")
     applied = 0
-    for _date, mid, n1, n2, s1, s2 in matches:
+    for i, (_date, mid, n1, n2, s1, s2) in enumerate(matches, 1):
         winner = n1 if s1 > s2 else (n2 if s2 > s1 else None)
-        if elo.record(n1, n2, winner, match_id=mid):
+        if elo.record(n1, n2, winner, match_id=mid, save=False):
             applied += 1
+        if i % 10000 == 0:
+            _log(f"[BOOT]   {i}/{len(matches)}")
+    elo.flush()  # una sola escritura a disco
     _log(f"[BOOT] {len(matches)} partidos con marcador · {applied} nuevos aplicados")
 
     _log("\n=== TOP 20 por Elo ===")
