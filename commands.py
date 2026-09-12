@@ -45,6 +45,7 @@ _HELP = (
     "/equipos — mejores/peores duplas jugador+equipo\n"
     "/equipos &lt;jugador&gt; — con qué equipos rinde ese jugador\n"
     "/excel — Excel jugador-equipo al momento\n"
+    "/dataset — CSV para el modelo (features + resultados)\n"
     "/glosario — qué significa cada dato de la tarjeta\n"
     "/ayuda — esta lista\n\n"
     "📢 Puedes escribir estos comandos <b>directamente en el canal de "
@@ -100,6 +101,8 @@ def _texts_for(cmd, arg="", rawarg=""):
         return "text", [reports.text_rate("del mes", reports.since_days_utc(30))]
     if cmd in ("excel", "csv"):
         return "excel", None
+    if cmd in ("dataset", "datos"):
+        return "dataset", None
     # jugador+equipo: /equipos (global) o /equipos <nick> (desglose del jugador)
     if cmd in ("equipos", "combos", "je", "jugadorequipo"):
         if rawarg:
@@ -163,6 +166,14 @@ def _deliver(target_chat, kind, payload):
         except Exception as e:
             _send(target_chat, "No pude generar el Excel ahora, intenta luego.")
             print(f"[WARN] /excel: {e}", file=sys.stderr)
+    elif kind == "dataset":
+        _send(target_chat, "🧠 Generando el dataset del modelo, dame unos segundos...")
+        try:
+            import export_dataset
+            export_dataset.generate_and_send(TelegramNotifier(chat_id=target_chat))
+        except Exception as e:
+            _send(target_chat, "No pude generar el dataset ahora, intenta luego.")
+            print(f"[WARN] /dataset: {e}", file=sys.stderr)
     else:  # text
         for t in payload:
             _send(target_chat, t)

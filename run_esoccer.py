@@ -106,7 +106,7 @@ def main():
             except Exception as e:
                 print(f"[WARN] elo.snapshot {mid}: {e}", file=sys.stderr)
             msg_id = notifier.send(format_match(p, a, edges=edges, elo=elo_snap))   # enviar primero → obtener message_id
-            rec = persistence.save_analysis(p, a, message_id=msg_id)
+            rec = persistence.save_analysis(p, a, message_id=msg_id, elo=elo_snap)
             pending.append(rec)
             nuevos += 1
             print(f"[MATCH] {p['player1']} vs {p['player2']} → score {a['score_a']} "
