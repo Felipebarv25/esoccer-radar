@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 
 import analytics
-from esb_source import ESBSource, _FINISHED_TOURNAMENT
+from esb_source import ESBSource, _PLAYED_TOURNAMENTS
 
 _MATCH_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "matches")
 _OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "reports")
@@ -86,7 +86,7 @@ def build(source: ESBSource, players: set, days: int = 3, max_pages: int = 60) -
         data = source._get("/tournaments", params={"page": page, "dateFrom": df, "dateTo": dt})
         total = data.get("totalPages", 1)
         for t in data.get("tournaments", []):
-            if t.get("status_id") == _FINISHED_TOURNAMENT:
+            if t.get("status_id") in _PLAYED_TOURNAMENTS:
                 tids.append(t["id"])
         page += 1
 

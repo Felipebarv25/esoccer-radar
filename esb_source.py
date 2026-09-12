@@ -19,7 +19,11 @@ from datetime import datetime, timedelta, timezone
 import requests
 
 BASE = "https://football.esportsbattle.com/api"
-_FINISHED_TOURNAMENT = 3  # status_id de torneo terminado (tiene resultados)
+_FINISHED_TOURNAMENT = 3  # status_id "terminado" (raro en el feed por fechas)
+# El feed /tournaments?dateFrom&dateTo marca los torneos YA JUGADOS casi siempre
+# como status 4 (comprobado: 1783 con status 4 vs 5 con status 3 en 30 días). Por
+# eso, para "torneos con resultados" usamos AMBOS y filtramos por marcador presente.
+_PLAYED_TOURNAMENTS = (3, 4)
 _SCHEDULED_MATCH = 1      # status_id de partido programado (aún no empieza)
 
 
@@ -113,8 +117,8 @@ class ESBSource:
                 break
             total_pages = data.get("totalPages", 1)
             for t in data.get("tournaments", []):
-                if t.get("status_id") == _FINISHED_TOURNAMENT:
-                    continue
+                if t.get("status_id") in _PLAYED_TOURNAMENTS:
+                    continue  # ya jugado: aquí buscamos los PRÓXIMOS
                 ttype = match_type(t.get("token_international"))
                 tid = t["id"]
                 tm = self._cached(
@@ -196,8 +200,8 @@ class ESBSource:
             agg = {"games": 0, "win": 0, "draw": 0, "lose": 0, "gf": 0, "ga": 0,
                    "tournaments": 0}
             for t in (tour.get("tournaments") or []):
-                if t.get("status_id") != _FINISHED_TOURNAMENT:
-                    continue
+                if t.get("status_id") not in _PLAYED_TOURNAMENTS:
+                    continue  # solo torneos ya jugados (3 o 4)
                 res = self.tournament_results(t["id"])
                 for row in (res.get("results") or []):
                     if (row.get("participant") or {}).get("nickname") != nickname:

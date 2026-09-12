@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 
 import elo
-from esb_source import ESBSource, _FINISHED_TOURNAMENT
+from esb_source import ESBSource, _PLAYED_TOURNAMENTS
 
 
 def _log(msg):
@@ -80,8 +80,9 @@ def run(days: int = 30, max_pages: int = 400, workers: int = 5):
     _log(f"[BOOT] torneos por status_id: {dict(statuses)} · páginas fallidas: {fallos_pag}")
 
     tids = [t["id"] for pg in pages for t in pg.get("tournaments", [])
-            if t.get("status_id") == _FINISHED_TOURNAMENT]
-    _log(f"[BOOT] {len(tids)} torneos terminados. Bajando sus partidos...")
+            if t.get("status_id") in _PLAYED_TOURNAMENTS]
+    _log(f"[BOOT] {len(tids)} torneos jugados. Bajando sus partidos "
+         f"(solo cuentan los que tengan marcador)...")
 
     # 2) bajar los partidos de cada torneo (paralelo moderado + reintentos)
     def fetch_matches(tid):
