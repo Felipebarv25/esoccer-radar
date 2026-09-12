@@ -58,15 +58,19 @@ def hit_stats(since_utc: datetime) -> dict:
 
 
 def _format(label: str, st: dict) -> str:
-    if st["decididos"] == 0:
+    # Denominador HONESTO: TODOS los partidos con favorito que cerraron.
+    # El empate cuenta como NO-acierto (el favorito no ganó).
+    conpick = st["aciertos"] + st["fallos"] + st["empates"]
+    if conpick == 0:
         cuerpo = "Sin partidos cerrados aún en este periodo."
     else:
+        rate = round(100 * st["aciertos"] / conpick)
         cuerpo = (f"✅ {st['aciertos']} aciertos · ❌ {st['fallos']} fallos · "
                   f"➖ {st['empates']} empates\n"
-                  f"🎯 <b>Tasa de acierto: {st['rate']}%</b> "
-                  f"(sobre {st['decididos']} con favorito)")
+                  f"🎯 <b>Tasa de acierto: {rate}%</b> "
+                  f"(aciertos sobre {conpick} partidos; el empate NO es acierto)")
     return (f"📊 <b>Reporte {label}</b>\n{cuerpo}\n"
-            f"<i>Mide acierto al favorito, NO rentabilidad ni probabilidad. "
+            f"<i>Mide que el favorito GANE, NO rentabilidad ni probabilidad. "
             f"Con pocos datos no es concluyente.</i>")
 
 
