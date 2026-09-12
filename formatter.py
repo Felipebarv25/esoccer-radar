@@ -35,11 +35,13 @@ def _reliability(h2h_matches, form_games_a, form_games_b) -> str:
     return "🔴 muestra pequeña — tómalo con pinzas"
 
 
-def format_match(meta: dict, a: dict, edges: list = None) -> str:
+def format_match(meta: dict, a: dict, edges: list = None, elo: dict = None) -> str:
     """meta: {player1,team1,player2,team2,date}. a: analyze_match(...).
 
     `edges`: ventajas históricas detectadas (analytics.detect_edges); si hay,
     se muestran en un bloque 🔥 destacado arriba de la tarjeta.
+    `elo`: foto pre-partido de Elo (elo.snapshot); se muestra junto al score
+    para comparar cuál calibra mejor.
     """
     A, B = a["player_a"], a["player_b"]
     ca, cb = a["career"]["a"], a["career"]["b"]
@@ -67,6 +69,16 @@ def format_match(meta: dict, a: dict, edges: list = None) -> str:
         linea_score = (f"📊 <b>Favorito: {html.escape(fav)} — Score {fav_score}/100</b>\n")
     else:
         linea_score = "📊 <b>Parejo (50/50)</b>\n"
+
+    # Elo (comparativo con el score). exp_a = prob. esperada de que gane A.
+    if elo:
+        exp_a = elo.get("exp_a", 0.5)
+        fav_elo = A if exp_a >= 0.5 else B
+        prob = round(100 * (exp_a if exp_a >= 0.5 else 1 - exp_a))
+        aviso = " · muestra baja" if min(elo.get("games_a", 0), elo.get("games_b", 0)) < 10 else ""
+        linea_score += (f"🔢 <b>Elo:</b> {html.escape(A)} {elo.get('elo_a')} vs "
+                        f"{html.escape(B)} {elo.get('elo_b')} → esperado "
+                        f"{html.escape(fav_elo)} {prob}%{aviso}\n")
 
     teams = f"🏳️ {html.escape(str(meta.get('team1','?')))} vs {html.escape(str(meta.get('team2','?')))}\n"
     cuerpo = (

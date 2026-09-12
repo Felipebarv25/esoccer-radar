@@ -7,6 +7,7 @@ desenlace para las tasas de acierto (#5b).
 import sys
 from datetime import datetime, timedelta, timezone
 
+import elo
 import persistence
 
 END_BUFFER_MIN = 12    # esperar tras el inicio a que termine (partido + lag)
@@ -77,6 +78,12 @@ def process(source, notifier, pending: list) -> list:
             "winner": result["winner"], "favored": fav,
             "outcome": outcome, "hit": hit, "closed_at": now.isoformat(),
         })
+        # Actualizar Elo de ambos jugadores (idempotente por match_id).
+        try:
+            elo.record(rec["player1"], rec["player2"], result["winner"],
+                       match_id=rec["match_id"])
+        except Exception as e:
+            print(f"[WARN] elo.record {rec['match_id']}: {e}", file=sys.stderr)
         if rec.get("message_id"):
             notifier.send(_format_close(rec, result, outcome), reply_to=rec["message_id"])
         print(f"[CLOSE] {rec['player1']} vs {rec['player2']} → {outcome} "

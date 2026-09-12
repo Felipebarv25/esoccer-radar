@@ -98,7 +98,14 @@ def main():
                     p["player2"], p.get("team2"), hora)
             except Exception as e:
                 print(f"[WARN] detect_edges {mid}: {e}", file=sys.stderr)
-            msg_id = notifier.send(format_match(p, a, edges=edges))   # enviar primero → obtener message_id
+            # Foto pre-partido de Elo (para mostrar junto al score y comparar).
+            elo_snap = None
+            try:
+                import elo
+                elo_snap = elo.snapshot(p["player1"], p["player2"])
+            except Exception as e:
+                print(f"[WARN] elo.snapshot {mid}: {e}", file=sys.stderr)
+            msg_id = notifier.send(format_match(p, a, edges=edges, elo=elo_snap))   # enviar primero → obtener message_id
             rec = persistence.save_analysis(p, a, message_id=msg_id)
             pending.append(rec)
             nuevos += 1
