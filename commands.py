@@ -45,6 +45,7 @@ _HELP = (
     "/equipos — mejores/peores duplas jugador+equipo\n"
     "/equipos &lt;jugador&gt; — con qué equipos rinde ese jugador\n"
     "/excel — Excel jugador-equipo al momento\n"
+    "/glosario — qué significa cada dato de la tarjeta\n"
     "/ayuda — esta lista\n\n"
     "📢 Puedes escribir estos comandos <b>directamente en el canal de "
     "reportes</b> y el reporte aparece ahí mismo.\n"
@@ -84,6 +85,8 @@ def _texts_for(cmd, arg="", rawarg=""):
     """Devuelve (kind, payload). kind: 'text' | 'excel' | 'help' | 'unknown'."""
     if cmd in ("start", "help", "ayuda"):
         return "help", None
+    if cmd in ("glosario", "diccionario", "info", "como", "significa"):
+        return "text", reports.glossary_messages()
     if cmd in ("hora", "hour"):
         return "text", [reports.text_last_hour()]
     if cmd in ("dia", "day"):

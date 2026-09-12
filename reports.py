@@ -338,6 +338,57 @@ def text_top_players(label: str, since_utc, min_n: int = 2, top: int = 10) -> st
     return _join([bloque, _NOTA])
 
 
+def glossary_messages():
+    """Diccionario de datos: qué significa cada dato de la tarjeta. Para /glosario."""
+    m1 = (
+        "📖 <b>¿Cómo funciona el bot? — Diccionario de datos</b>\n\n"
+        "Analiza cada partido de eSports Battle ANTES de que empiece con datos "
+        "reales de la API oficial. <b>Es una herramienta de información, NO un "
+        "pronóstico ni una probabilidad — no le gana a la casa.</b>\n\n"
+        "🧮 <b>Score /100 (Favorito)</b>\n"
+        "Resume hacia quién se inclina el partido. <b>50 = parejo</b>, más alto = "
+        "más se inclina a ese jugador. Se calcula así:\n"
+        "• 60% → diferencia de <b>win% de carrera</b> entre los dos.\n"
+        "• 40% → quién <b>domina el head-to-head</b> (H2H) directo.\n"
+        "Mostramos el número del <b>favorito</b> (el más fuerte). "
+        "<i>NO es probabilidad de ganar: es fuerza relativa según su historial.</i>\n\n"
+        "🚨 <b>ON FIRE</b>\n"
+        "Aparece solo si, con NUESTROS datos acumulados, un jugador trae ventaja "
+        "clara: rinde con ese equipo, domina a ese rival, va fuerte en esa hora, "
+        "o viene en racha. Solo salta con muestra suficiente.\n\n"
+        "👤 <b>Carrera win%</b>\n"
+        "Porcentaje de partidos ganados en TODA la carrera de cada jugador.\n\n"
+        "📈 <b>Forma reciente (gol/partido)</b>\n"
+        "En sus últimos torneos: goles a favor ⚽ y en contra 🥅 por partido. "
+        "Mide su momento actual (ataque/defensa)."
+    )
+    m2 = (
+        "⚔️ <b>H2H (head-to-head)</b>\n"
+        "Historial DIRECTO entre esos dos jugadores. «H2H (8): A 5-1-2 B» = de 8 "
+        "duelos, A ganó 5, empataron 1, B ganó 2.\n\n"
+        "⚽ <b>Goles H2H</b>\n"
+        "Sobre esos duelos directos:\n"
+        "• <b>prom</b> = goles totales promedio por partido.\n"
+        "• <b>O2.5 / O3.5 / O4.5</b> (Over) = % de partidos con MÁS de 2.5 / 3.5 / "
+        "4.5 goles (o sea 3+, 4+, 5+ goles en total).\n"
+        "• <b>BTTS</b> (both teams to score) = % de partidos en que <b>ambos</b> "
+        "anotaron.\n\n"
+        "📋 <b>Últimos</b>\n"
+        "Los marcadores más recientes entre ambos.\n\n"
+        "🔎 <b>Confiabilidad</b>\n"
+        "🟢 muestra amplia · 🟡 media · 🔴 pequeña (tómalo con pinzas). Mientras "
+        "menos partidos haya, menos confiable es el análisis.\n\n"
+        "🏁 <b>Cierre del partido</b> (respuesta ✅/❌ bajo la alerta)\n"
+        "• ✅ <b>Acertó</b>: el favorito ganó.\n"
+        "• ❌ <b>Falló</b>: el favorito no ganó.\n"
+        "• ➖ <b>Empate</b>: terminó igualado.\n"
+        "• ⚪ <b>Parejo</b>: no había favorito (score 50).\n\n"
+        "<i>Todo son datos observados, no garantías. Apuesta solo lo que puedas "
+        "perder.</i>"
+    )
+    return [m1, m2]
+
+
 def text_combos(min_n: int = 2, top: int = 12) -> str:
     """Ranking global de duplas jugador+equipo (mejores y peores). Para /equipos."""
     views = analytics.load_views()

@@ -40,6 +40,11 @@ def main():
         commands.start_in_thread()
     except Exception as e:
         print(f"[WARN] no pude iniciar comandos: {e}", file=sys.stderr)
+
+    # Vigilancia de salud: avisa al canal de reportes si la API se bloquea o
+    # deja de emitir partidos por mucho tiempo.
+    from watchdog import Watchdog
+    health = Watchdog(reports_notifier)
     seen = persistence.already_saved_ids()   # no re-avisar los ya guardados
     pending = persistence.load_open()        # partidos alertados sin desenlace aún
 
@@ -61,8 +66,10 @@ def main():
             pairs = match_pairs(source.upcoming_matches())
         except Exception as e:
             print(f"[WARN] fallo al listar próximos: {e}", file=sys.stderr)
+            health.fetch_error()
             time.sleep(interval)
             continue
+        health.ok_fetch(len(pairs))
 
         nuevos = 0
         edge_views = None   # stats acumuladas, se cargan una vez por ciclo (perezoso)
