@@ -53,6 +53,7 @@ _HELP = (
     "/horas_calientes — franjas donde el favorito gana más/menos\n"
     "/jugadores_horas — jugadores letales en su hora caliente\n"
     "/excel — Excel jugador-equipo al momento\n"
+    "/agenda — Excel de próximos partidos (24h) por probabilidad\n"
     "/dataset — CSV para el modelo (features + resultados)\n"
     "/glosario — qué significa cada dato de la tarjeta\n"
     "/ayuda — esta lista\n\n"
@@ -114,6 +115,9 @@ def _texts_for(cmd, arg="", rawarg="", raw_cmd=""):
         return "excel", None
     if cmd in ("dataset", "datos"):
         return "dataset", None
+    if cmd in ("agenda", "manana", "mañana", "proximos", "calendario"):
+        horas = int(arg) if arg.isdigit() else 24
+        return "agenda", horas
     if cmd in ("calibracion", "calibration", "calib"):
         return "text", [reports.text_calibration()]
     if cmd in ("confianza", "confidence", "niveles"):
@@ -212,6 +216,16 @@ def _deliver(target_chat, kind, payload):
         except Exception as e:
             _send(target_chat, "No pude generar el dataset ahora, intenta luego.")
             print(f"[WARN] /dataset: {e}", file=sys.stderr)
+    elif kind == "agenda":
+        _send(target_chat, "📅 Armando la agenda de próximos partidos, dame unos "
+                           "segundos (consulto la API)...")
+        try:
+            import agenda
+            agenda.generate_and_send(TelegramNotifier(chat_id=target_chat),
+                                     hours=payload or 24)
+        except Exception as e:
+            _send(target_chat, "No pude armar la agenda ahora, intenta luego.")
+            print(f"[WARN] /agenda: {e}", file=sys.stderr)
     elif kind == "profile":
         _send(target_chat, f"🔎 Buscando estadísticas de {payload}...")
         try:
