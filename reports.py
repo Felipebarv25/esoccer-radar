@@ -14,6 +14,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 import analytics
+import config
 
 _COL = timezone(timedelta(hours=-5))
 _DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "matches")
@@ -370,6 +371,11 @@ def glossary_messages():
         "suficiente; si no, vuelve a 60% carrera / 40% H2H).\n"
         "Mostramos el número del <b>favorito</b> (el más fuerte). "
         "<i>NO es probabilidad de ganar: es fuerza relativa según su historial.</i>\n\n"
+        "⭐ <b>Niveles de confianza</b>\n"
+        "Según el histórico, a más Score más acierta el favorito. Por eso "
+        "marcamos: <b>⭐⭐ ALTA</b> (Score ≥70, el favorito gana ~79%), "
+        "<b>⭐ media</b> (60-69, ~59%). Sin estrella (&lt;60) es casi moneda al "
+        "aire. Mira /confianza para la tasa por nivel.\n\n"
         "🔢 <b>Elo</b>\n"
         "Número de fuerza de cada jugador (todos arrancan en 1500). Sube al ganar "
         "y baja al perder, y se mueve <b>más</b> cuando el resultado es sorpresa "
@@ -437,6 +443,28 @@ def text_calibration() -> str:
         _fmt_calib_board(el, "🔢 Por banda de probabilidad del Elo"),
         "<i>El Elo solo cubre partidos recientes (con features). El Score cubre "
         "todo el histórico guardado.</i>",
+        _NOTA,
+    ])
+
+
+def text_confidence() -> str:
+    """Tasa de acierto por nivel de confianza (⭐⭐/⭐/sin). /confianza."""
+    hi, med = config.CONF_HIGH, config.CONF_MED
+    t = analytics.confidence_stats(analytics.load_views(), hi, med)
+
+    def _line(icono, etq, d):
+        if d["n"] == 0:
+            return f"{icono} <b>{etq}</b>: sin partidos aún"
+        return (f"{icono} <b>{etq}</b>: {d['tasa']}% "
+                f"({d['ac']}/{d['n']} · el favorito ganó)")
+
+    return _join([
+        "🎯 <b>Tasa por nivel de confianza</b> (histórico)",
+        _line("⭐⭐", f"Alta (Score ≥{hi})", t["alta"]),
+        _line("⭐", f"Media (Score {med}–{hi - 1})", t["media"]),
+        _line("▫️", f"Baja (Score <{med})", t["baja"]),
+        f"<i>Estrategia: apuesta preferentemente a los ⭐⭐/⭐. Los ▫️ son casi "
+        f"moneda al aire. El empate cuenta como no-acierto.</i>",
         _NOTA,
     ])
 

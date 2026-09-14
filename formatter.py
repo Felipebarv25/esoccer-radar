@@ -2,6 +2,8 @@
 import html
 from datetime import datetime, timedelta, timezone
 
+import config
+
 _COL = timezone(timedelta(hours=-5))  # Colombia = UTC-5 (sin horario de verano)
 
 
@@ -95,12 +97,19 @@ def format_match(meta: dict, a: dict, edges: list = None, elo: dict = None) -> s
         f"{B} {_num(fb['gf_per_game'])}⚽/{_num(fb['ga_per_game'])}🥅\n"
         f"⚔️ H2H ({h['matches']}): {A} {h['a_win']}-{h['draw']}-{h['b_win']} {B}\n"
     )
+    # Nivel de confianza según la fuerza del favorito (calibrado con el histórico).
+    bloque_conf = ""
+    if fav and fav_score >= config.CONF_HIGH:
+        bloque_conf = f"⭐⭐ <b>ALTA CONFIANZA</b> — Score {fav_score}/100\n\n"
+    elif fav and fav_score >= config.CONF_MED:
+        bloque_conf = f"⭐ <b>Confianza media</b> — Score {fav_score}/100\n\n"
+
     bloque_edge = ""
     if edges:
         bloque_edge = ("🚨 <b>ON FIRE</b> (según nuestros datos)\n"
                        + "\n".join(edges) + "\n\n")
 
-    msg = titulo + reloj + "\n" + teams + "\n" + bloque_edge + linea_score + cuerpo
+    msg = titulo + reloj + "\n" + teams + "\n" + bloque_conf + bloque_edge + linea_score + cuerpo
     if h["matches"]:
         msg += (
             f"⚽ Goles H2H: prom <b>{_num(h['avg_total_goals'])}</b> · "

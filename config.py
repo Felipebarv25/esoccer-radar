@@ -19,6 +19,9 @@ POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
 # ¿El Score usa el win% del jugador CON el equipo que va a usar? (prueba A/B).
 # Poner SCORE_USE_TEAM=0 en .env para volver al Score anterior (60% carrera/40% H2H).
 SCORE_USE_TEAM = os.getenv("SCORE_USE_TEAM", "1").strip().lower() not in ("0", "false", "no", "")
+# Umbrales de nivel de confianza (fuerza del favorito). Configurables sin tocar código.
+CONF_HIGH = int(os.getenv("CONF_HIGH", "70"))   # ⭐⭐ alta confianza
+CONF_MED = int(os.getenv("CONF_MED", "60"))     # ⭐ confianza media
 
 _PLACEHOLDERS = {"", "pega_aqui_el_token_del_bot_nuevo", "pega_aqui_el_id_del_canal"}
 

@@ -395,6 +395,26 @@ def elo_calibration(views):
     return out
 
 
+def confidence_stats(views, high=70, med=60):
+    """Tasa de acierto por nivel de confianza (fuerza del favorito)."""
+    tiers = {"alta": {"n": 0, "ac": 0}, "media": {"n": 0, "ac": 0},
+             "baja": {"n": 0, "ac": 0}}
+    for v in views:
+        if v["outcome"] not in _CONPICK:
+            continue
+        sc = v["score_a"]
+        if sc is None:
+            continue
+        fav = sc if sc >= 50 else 100 - sc
+        tier = "alta" if fav >= high else ("media" if fav >= med else "baja")
+        tiers[tier]["n"] += 1
+        if v["outcome"] == "acierto":
+            tiers[tier]["ac"] += 1
+    for t in tiers.values():
+        t["tasa"] = round(100 * t["ac"] / t["n"]) if t["n"] else None
+    return tiers
+
+
 def goals_summary(views):
     """Sesgo de goles realizado: promedio, Over 2.5/3.5, ambos anotan (BTTS)."""
     n = tot = over25 = over35 = btts = 0
