@@ -249,6 +249,20 @@ def weekday_board(views):
     return out
 
 
+def hour_table(views):
+    """{hora_col: {n, tasa}} — % de acierto al favorito por franja. Para la tarjeta."""
+    agg = defaultdict(lambda: {"conpick": 0, "acierto": 0})
+    for v in views:
+        if v["start_col"] is None or v["outcome"] not in _CONPICK:
+            continue
+        a = agg[v["start_col"].hour]
+        a["conpick"] += 1
+        if v["outcome"] == "acierto":
+            a["acierto"] += 1
+    return {h: {"n": a["conpick"], "tasa": round(100 * a["acierto"] / a["conpick"])}
+            for h, a in agg.items() if a["conpick"] > 0}
+
+
 def hour_board(views, min_n=3):
     """Aciertos por franja horaria (hora de inicio, COL). EXPLORATORIO."""
     agg = defaultdict(lambda: {"conpick": 0, "acierto": 0})

@@ -73,6 +73,7 @@ def main():
 
         nuevos = 0
         edge_views = None   # stats acumuladas, se cargan una vez por ciclo (perezoso)
+        hour_tbl = None     # temperatura por franja horaria (se calcula una vez)
         for p in pairs:
             mid = str(p.get("match_id"))
             if mid in seen or not p.get("player1") or not p.get("player2"):
@@ -85,11 +86,13 @@ def main():
                 print(f"[WARN] no pude analizar {p['player1']} vs {p['player2']}: {e}",
                       file=sys.stderr)
                 continue
-            # Ventajas históricas ("on fire") desde nuestros datos acumulados.
+            # Ventajas históricas ("on fire") + temperatura de la hora.
             edges = []
+            hour_stat = None
             try:
                 if edge_views is None:
                     edge_views = analytics.load_views()
+                    hour_tbl = analytics.hour_table(edge_views)
                 hora = None
                 sc = analytics._parse(p.get("date"))
                 if sc:
@@ -97,6 +100,10 @@ def main():
                 edges = analytics.detect_edges(
                     edge_views, p["player1"], p.get("team1"),
                     p["player2"], p.get("team2"), hora)
+                if hora is not None and hour_tbl:
+                    hs = hour_tbl.get(hora)
+                    if hs:
+                        hour_stat = {"hora": hora, **hs}
             except Exception as e:
                 print(f"[WARN] detect_edges {mid}: {e}", file=sys.stderr)
             # Foto pre-partido de Elo (para mostrar junto al score y comparar).
@@ -106,7 +113,8 @@ def main():
                 elo_snap = elo.snapshot(p["player1"], p["player2"])
             except Exception as e:
                 print(f"[WARN] elo.snapshot {mid}: {e}", file=sys.stderr)
-            msg_id = notifier.send(format_match(p, a, edges=edges, elo=elo_snap))   # enviar primero → obtener message_id
+            msg_id = notifier.send(format_match(p, a, edges=edges, elo=elo_snap,
+                                                hour_stat=hour_stat))   # enviar primero → obtener message_id
             rec = persistence.save_analysis(p, a, message_id=msg_id, elo=elo_snap)
             pending.append(rec)
             nuevos += 1

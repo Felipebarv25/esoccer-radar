@@ -37,7 +37,8 @@ def _reliability(h2h_matches, form_games_a, form_games_b) -> str:
     return "🔴 muestra pequeña — tómalo con pinzas"
 
 
-def format_match(meta: dict, a: dict, edges: list = None, elo: dict = None) -> str:
+def format_match(meta: dict, a: dict, edges: list = None, elo: dict = None,
+                 hour_stat: dict = None) -> str:
     """meta: {player1,team1,player2,team2,date}. a: analyze_match(...).
 
     `edges`: ventajas históricas detectadas (analytics.detect_edges); si hay,
@@ -89,6 +90,14 @@ def format_match(meta: dict, a: dict, edges: list = None, elo: dict = None) -> s
                         f"{html.escape(str(td['team_a']))} {round(100 * td['wr_a'])}% "
                         f"· {html.escape(B)} con {html.escape(str(td['team_b']))} "
                         f"{round(100 * td['wr_b'])}%\n")
+
+    # Temperatura de la franja horaria (qué tan predecible es a esta hora)
+    if hour_stat:
+        t, n = hour_stat["tasa"], hour_stat["n"]
+        ic = "🟢" if t >= 54 else ("🔴" if t <= 48 else "⚪")
+        baja = " · muestra baja" if n < 20 else ""
+        linea_score += (f"🕐 <b>Franja {hour_stat['hora']:02d}:00:</b> {ic} el "
+                        f"favorito gana {t}% (n={n}){baja}\n")
 
     teams = f"🏳️ {html.escape(str(meta.get('team1','?')))} vs {html.escape(str(meta.get('team2','?')))}\n"
     cuerpo = (
