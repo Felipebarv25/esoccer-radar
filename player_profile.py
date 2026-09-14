@@ -200,11 +200,12 @@ def format_profile(p: dict) -> str:
         L.append(f"📊 Carrera total: {c['win']}-{c['draw']}-{c['lose']} de "
                  f"{c['matches']} ({cwr})")
 
-    # equipos (por nº de partidos), con win% y goles a favor/p
+    # equipos (por nº de partidos), con win% y goles a favor/p — TODOS
     teams = sorted(p["per_team"].items(), key=lambda kv: kv[1]["g"], reverse=True)
     if teams:
-        L.append("\n🛡️ <b>Equipos con los que juega</b> (win% · goles/p):")
-        for name, t in teams[:8]:
+        L.append(f"\n🛡️ <b>Equipos con los que juega</b> ({len(teams)}) "
+                 f"(win% · goles/p):")
+        for name, t in teams:
             twr = round(100 * t["w"] / t["g"])
             L.append(f"• {name} — {twr}% ({t['w']}/{t['g']}) · "
                      f"{round(t['gf'] / t['g'], 1)}⚽")
