@@ -44,6 +44,8 @@ _HELP = (
     "/peores [semana|quincena|mes] — peores jugadores\n"
     "/equipos — mejores/peores duplas jugador+equipo\n"
     "/equipos &lt;jugador&gt; — con qué equipos rinde ese jugador\n"
+    "/detalle_jugadores — lista de jugadores (toca uno para su perfil)\n"
+    "/&lt;nick&gt; — estadísticas personales de un jugador\n"
     "/excel — Excel jugador-equipo al momento\n"
     "/dataset — CSV para el modelo (features + resultados)\n"
     "/glosario — qué significa cada dato de la tarjeta\n"
@@ -73,16 +75,17 @@ def _norm(tok: str) -> str:
 
 
 def _split(text: str):
-    """Devuelve (cmd, arg, rawarg). arg normalizado; rawarg conserva mayúsculas (nicks)."""
+    """Devuelve (cmd, arg, rawarg, raw_cmd). raw_cmd/rawarg conservan mayúsculas (nicks)."""
     t = text.strip()
     parts = t.split()
     cmd = _norm(parts[0]) if parts else ""
     arg = _norm(parts[1]) if len(parts) > 1 else ""
     rawarg = t[len(parts[0]):].strip() if len(parts) > 1 else ""
-    return cmd, arg, rawarg
+    raw_cmd = parts[0].lstrip("/").split("@")[0] if parts else ""
+    return cmd, arg, rawarg, raw_cmd
 
 
-def _texts_for(cmd, arg="", rawarg=""):
+def _texts_for(cmd, arg="", rawarg="", raw_cmd=""):
     """Devuelve (kind, payload). kind: 'text' | 'excel' | 'help' | 'unknown'."""
     if cmd in ("start", "help", "ayuda"):
         return "help", None
@@ -103,6 +106,17 @@ def _texts_for(cmd, arg="", rawarg=""):
         return "excel", None
     if cmd in ("dataset", "datos"):
         return "dataset", None
+    # listado de jugadores (cada uno como /<nick>)
+    if cmd in ("detalle_jugadores", "detallejugadores", "lista_jugadores",
+               "jugadores_lista", "lista"):
+        page = int(arg) if arg.isdigit() else 1
+        import player_profile
+        return "text", [player_profile.players_page(page)]
+    # perfil explícito: /detalle <nick>
+    if cmd in ("detalle", "perfil"):
+        if rawarg:
+            return "profile", rawarg
+        return "text", ["Escribe /detalle <jugador>, o /detalle_jugadores para la lista."]
     # jugador+equipo: /equipos (global) o /equipos <nick> (desglose del jugador)
     if cmd in ("equipos", "combos", "je", "jugadorequipo"):
         if rawarg:
@@ -131,6 +145,10 @@ def _texts_for(cmd, arg="", rawarg=""):
     elif cmd in ("peoresmes",):
         fn, periodo = reports.text_worst_players, "mes"
     else:
+        # ¿es el nick de un jugador? (al tocar /DEKSON en la lista)
+        import player_profile
+        if player_profile.resolve(raw_cmd):
+            return "profile", raw_cmd
         return "unknown", None
     return "text", [_ranking(fn, periodo)]
 
@@ -174,6 +192,14 @@ def _deliver(target_chat, kind, payload):
         except Exception as e:
             _send(target_chat, "No pude generar el dataset ahora, intenta luego.")
             print(f"[WARN] /dataset: {e}", file=sys.stderr)
+    elif kind == "profile":
+        _send(target_chat, f"🔎 Buscando estadísticas de {payload}...")
+        try:
+            import player_profile
+            player_profile.generate_and_send(TelegramNotifier(chat_id=target_chat), payload)
+        except Exception as e:
+            _send(target_chat, "No pude armar el perfil ahora, intenta luego.")
+            print(f"[WARN] /perfil {payload}: {e}", file=sys.stderr)
     else:  # text
         for t in payload:
             _send(target_chat, t)
@@ -183,20 +209,20 @@ def _handle_channel(chat_id, text):
     """Comando escrito DENTRO de un canal (solo el canal de reportes)."""
     if str(chat_id) != str(config.TELEGRAM_REPORTS_CHAT_ID):
         return  # ignorar comandos en otros canales
-    cmd, arg, rawarg = _split(text)
-    kind, payload = _texts_for(cmd, arg, rawarg)
+    cmd, arg, rawarg, raw_cmd = _split(text)
+    kind, payload = _texts_for(cmd, arg, rawarg, raw_cmd)
     _deliver(config.TELEGRAM_REPORTS_CHAT_ID, kind, payload)  # responde en el mismo canal
     print(f"[CMD] canal cmd={cmd} arg={arg}", file=sys.stderr)
 
 
 def _handle_private(chat_id, uid, text):
     """Comando por chat privado con el bot (autorizado por id de dueño)."""
-    cmd, arg, rawarg = _split(text)
+    cmd, arg, rawarg, raw_cmd = _split(text)
     if not _authorized(uid):
         _send(chat_id, "⛔ No autorizado.")
         print(f"[CMD] rechazado uid={uid} cmd={cmd}", file=sys.stderr)
         return
-    kind, payload = _texts_for(cmd, arg, rawarg)
+    kind, payload = _texts_for(cmd, arg, rawarg, raw_cmd)
     if kind in ("help", "unknown"):
         _deliver(chat_id, kind, payload)               # ayuda/errores al privado
     else:
