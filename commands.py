@@ -48,6 +48,7 @@ _HELP = (
     "/top_equipos — top 30 duplas jugador+equipo por win%\n"
     "/detalle_jugadores — lista de jugadores (toca uno para su perfil)\n"
     "/&lt;nick&gt; — estadísticas personales de un jugador\n"
+    "/&lt;nick&gt;_Excel — Excel con TODOS los partidos del jugador\n"
     "/calibracion — ¿a más Score/Elo, más acierto?\n"
     "/confianza — tasa por nivel (⭐⭐ alta / ⭐ media / baja)\n"
     "/horas_calientes — franjas donde el favorito gana más/menos\n"
@@ -130,6 +131,12 @@ def _texts_for(cmd, arg="", rawarg="", raw_cmd=""):
                "mejores_duplas", "topduplas"):
         mg = int(arg) if arg.isdigit() else 10
         return "text", [reports.text_top_player_team(min_games=mg)]
+    # Excel de TODOS los partidos de un jugador: /<nick>_Excel  o  /partidos <nick>
+    if cmd.endswith("_excel") and len(cmd) > 6:
+        nick_raw = raw_cmd[:-6] if raw_cmd.lower().endswith("_excel") else raw_cmd
+        return "player_excel", nick_raw
+    if cmd in ("partidos", "excel_jugador", "historial") and rawarg:
+        return "player_excel", rawarg
     # listado de jugadores (cada uno como /<nick>)
     if cmd in ("detalle_jugadores", "detallejugadores", "lista_jugadores",
                "jugadores_lista", "lista"):
@@ -234,6 +241,23 @@ def _deliver(target_chat, kind, payload):
         except Exception as e:
             _send(target_chat, "No pude armar el perfil ahora, intenta luego.")
             print(f"[WARN] /perfil {payload}: {e}", file=sys.stderr)
+    elif kind == "player_excel":
+        import player_profile
+        canon = player_profile.resolve(payload)
+        if not canon:
+            cands = player_profile.candidates(payload)
+            _send(target_chat, ("🔎 ¿Cuál? " + " ".join(f"/{c}_Excel" for c in cands))
+                  if cands else f"No tengo datos de «{payload}».")
+        else:
+            _send(target_chat, f"📄 Armando el Excel de todos los partidos de "
+                               f"{canon}, dame unos segundos (consulto la API)...")
+            try:
+                import player_matches
+                player_matches.generate_and_send(
+                    TelegramNotifier(chat_id=target_chat), canon)
+            except Exception as e:
+                _send(target_chat, "No pude generar el Excel ahora, intenta luego.")
+                print(f"[WARN] player_excel {canon}: {e}", file=sys.stderr)
     else:  # text
         for t in payload:
             _send(target_chat, t)
