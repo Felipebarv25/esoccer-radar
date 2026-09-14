@@ -14,6 +14,7 @@ Convenciones de outcome (las pone backtest.py):
 import glob
 import json
 import os
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -23,6 +24,10 @@ _DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domin
 # outcomes que representan un partido cerrado CON pick decidible (favorito sí/no ganó)
 _CONPICK = ("acierto", "fallo", "empate")
 
+# Caché en memoria de load_views: leer miles de JSON en cada comando era lento.
+_VIEWS_CACHE = {"t": 0.0, "data": None}
+_VIEWS_TTL = 30  # segundos (los reportes toleran ~30s de retraso; los comandos van al instante)
+
 
 def _parse(iso):
     try:
@@ -31,8 +36,12 @@ def _parse(iso):
         return None
 
 
-def load_views():
-    """Lee todos los registros y los normaliza a una vista uniforme."""
+def load_views(force=False):
+    """Lee todos los registros y los normaliza a una vista uniforme (con caché TTL)."""
+    now = time.time()
+    if (not force and _VIEWS_CACHE["data"] is not None
+            and now - _VIEWS_CACHE["t"] < _VIEWS_TTL):
+        return _VIEWS_CACHE["data"]
     views = []
     for p in glob.glob(os.path.join(_DIR, "*.json")):
         try:
@@ -58,6 +67,8 @@ def load_views():
             "sa": res.get("sa"), "sb": res.get("sb"),
             "closed": bool(res),
         })
+    _VIEWS_CACHE["t"] = now
+    _VIEWS_CACHE["data"] = views
     return views
 
 

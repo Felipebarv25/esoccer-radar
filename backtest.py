@@ -101,7 +101,8 @@ def process(source, notifier, pending: list) -> list:
         try:
             team_ratings.record(rec["player1"], rec.get("team1"),
                                 rec["player2"], rec.get("team2"),
-                                result["winner"], match_id=rec["match_id"])
+                                result["winner"], match_id=rec["match_id"],
+                                seg=rec.get("match_type"))
         except Exception as e:
             print(f"[WARN] team_ratings.record {rec['match_id']}: {e}", file=sys.stderr)
         if rec.get("message_id"):

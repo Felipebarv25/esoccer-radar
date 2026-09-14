@@ -469,7 +469,7 @@ def text_confidence() -> str:
     ])
 
 
-def text_top_player_team(min_games: int = 10, top: int = 30) -> str:
+def text_top_player_team(min_games: int = 10, top: int = 50) -> str:
     """Top jugador+equipo por win% (de team_ratings, sembrado con el histórico)."""
     import team_ratings
     rows = team_ratings.top(min_games=min_games, limit=top)
@@ -480,7 +480,8 @@ def text_top_player_team(min_games: int = 10, top: int = 30) -> str:
     L = [f"🏆 <b>Top {len(rows)} jugador + equipo</b> por win% "
          f"(mín. {min_games} partidos):"]
     for i, r in enumerate(rows, 1):
-        L.append(f"{i}. {r['player']} con {r['team']} — {r['wr']}% "
+        seg = f" [{r['seg']}]" if r.get("seg") else ""
+        L.append(f"{i}. {r['player']}{seg} con {r['team']} — {r['wr']}% "
                  f"({r['w']}/{r['g']})")
     return _join(["\n".join(L), _NOTA])
 

@@ -55,23 +55,32 @@ def get(player, team):
     return (e["g"], e["w"], e["w"] / e["g"])
 
 
-def _bump(s, player, team, won):
+def _bump(s, player, team, won, seg=None):
     if not player or not team:
         return
     e = s["pt"].setdefault(_key(player, team), {"g": 0, "w": 0})
     e["g"] += 1
     if won:
         e["w"] += 1
+    if seg:
+        sg = e.setdefault("seg", {})
+        sg[seg] = sg.get(seg, 0) + 1
 
 
-def record(p1, t1, p2, t2, winner, match_id=None, save=True):
+def dominant_seg(e):
+    """Segmento (2x4/2x5/2x6) más frecuente de un combo, o None."""
+    sg = e.get("seg") or {}
+    return max(sg, key=sg.get) if sg else None
+
+
+def record(p1, t1, p2, t2, winner, match_id=None, save=True, seg=None):
     """Suma un partido a las dos combinaciones (p1,t1) y (p2,t2). Idempotente."""
     s = _load()
     mid = None if match_id is None else str(match_id)
     if mid is not None and mid in s["done_set"]:
         return False
-    _bump(s, p1, t1, winner == p1)
-    _bump(s, p2, t2, winner == p2)
+    _bump(s, p1, t1, winner == p1, seg)
+    _bump(s, p2, t2, winner == p2, seg)
     if mid is not None:
         s["done_set"].add(mid)
     if save:
@@ -83,7 +92,7 @@ def flush():
     _save()
 
 
-def top(min_games=10, limit=30):
+def top(min_games=10, limit=50):
     """Combos (jugador, equipo) con mejor win%, con mínimo de partidos."""
     rows = []
     for key, e in _load()["pt"].items():
@@ -91,6 +100,6 @@ def top(min_games=10, limit=30):
             continue
         player, team = key.split("|", 1)
         rows.append({"player": player, "team": team, "g": e["g"], "w": e["w"],
-                     "wr": round(100 * e["w"] / e["g"])})
+                     "wr": round(100 * e["w"] / e["g"]), "seg": dominant_seg(e)})
     rows.sort(key=lambda r: (r["wr"], r["g"]), reverse=True)
     return rows[:limit]

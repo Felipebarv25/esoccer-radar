@@ -22,7 +22,7 @@ import requests
 
 import elo
 import team_ratings
-from esb_source import ESBSource, _PLAYED_TOURNAMENTS
+from esb_source import ESBSource, _PLAYED_TOURNAMENTS, match_type
 
 
 def _log(msg):
@@ -80,8 +80,10 @@ def run(days: int = 30, max_pages: int = 400, workers: int = 5):
                        for t in pg.get("tournaments", []))
     _log(f"[BOOT] torneos por status_id: {dict(statuses)} · páginas fallidas: {fallos_pag}")
 
-    tids = [t["id"] for pg in pages for t in pg.get("tournaments", [])
-            if t.get("status_id") in _PLAYED_TOURNAMENTS]
+    tid_type = {t["id"]: match_type(t.get("token_international"))
+                for pg in pages for t in pg.get("tournaments", [])
+                if t.get("status_id") in _PLAYED_TOURNAMENTS}
+    tids = list(tid_type.keys())
     _log(f"[BOOT] {len(tids)} torneos jugados. Bajando sus partidos "
          f"(solo cuentan los que tengan marcador)...")
 
@@ -91,10 +93,11 @@ def run(days: int = 30, max_pages: int = 400, workers: int = 5):
 
     matches = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = [ex.submit(fetch_matches, t) for t in tids]
+        futs = {ex.submit(fetch_matches, t): t for t in tids}
         done = 0
         for fut in concurrent.futures.as_completed(futs):
             done += 1
+            seg = tid_type.get(futs[fut])   # tipo del torneo (2x4/2x5/2x6)
             try:
                 data = fut.result()
                 arr = data if isinstance(data, list) else (data.get("matches") or [])
@@ -106,7 +109,7 @@ def run(days: int = 30, max_pages: int = 400, workers: int = 5):
                         continue
                     t1 = (p1.get("team") or {}).get("token_international")
                     t2 = (p2.get("team") or {}).get("token_international")
-                    matches.append((m.get("date", ""), m.get("id"), n1, n2, s1, s2, t1, t2))
+                    matches.append((m.get("date", ""), m.get("id"), n1, n2, s1, s2, t1, t2, seg))
             except Exception:
                 pass
             if done % 50 == 0 or done == len(futs):
@@ -116,11 +119,11 @@ def run(days: int = 30, max_pages: int = 400, workers: int = 5):
     matches.sort(key=lambda x: x[0])
     _log(f"[BOOT] aplicando {len(matches)} partidos a Elo + team_ratings...")
     applied = 0
-    for i, (_date, mid, n1, n2, s1, s2, t1, t2) in enumerate(matches, 1):
+    for i, (_date, mid, n1, n2, s1, s2, t1, t2, seg) in enumerate(matches, 1):
         winner = n1 if s1 > s2 else (n2 if s2 > s1 else None)
         if elo.record(n1, n2, winner, match_id=mid, save=False):
             applied += 1
-        team_ratings.record(n1, t1, n2, t2, winner, match_id=mid, save=False)
+        team_ratings.record(n1, t1, n2, t2, winner, match_id=mid, save=False, seg=seg)
         if i % 10000 == 0:
             _log(f"[BOOT]   {i}/{len(matches)}")
     elo.flush()

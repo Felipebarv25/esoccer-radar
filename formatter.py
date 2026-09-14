@@ -38,7 +38,7 @@ def _reliability(h2h_matches, form_games_a, form_games_b) -> str:
 
 
 def format_match(meta: dict, a: dict, edges: list = None, elo: dict = None,
-                 hour_stat: dict = None) -> str:
+                 hour_stat: dict = None, top_combo: dict = None) -> str:
     """meta: {player1,team1,player2,team2,date}. a: analyze_match(...).
 
     `edges`: ventajas históricas detectadas (analytics.detect_edges); si hay,
@@ -106,6 +106,18 @@ def format_match(meta: dict, a: dict, edges: list = None, elo: dict = None,
         f"{B} {_num(fb['gf_per_game'])}⚽/{_num(fb['ga_per_game'])}🥅\n"
         f"⚔️ H2H ({h['matches']}): {A} {h['a_win']}-{h['draw']}-{h['b_win']} {B}\n"
     )
+    # Oportunidad TOP: el favorito usa un equipo del TOP 50 histórico.
+    bloque_top = ""
+    if top_combo:
+        seg = f" [{top_combo['seg']}]" if top_combo.get("seg") else ""
+        bloque_top = (
+            "🟢🔥💰🔥💰🔥💰🔥🟢\n"
+            f"💎 <b>OPORTUNIDAD TOP</b> 💎\n"
+            f"⭐ {html.escape(str(top_combo['player']))} con "
+            f"{html.escape(str(top_combo['team']))}{seg}: <b>{top_combo['wr']}%</b> "
+            f"histórico ({top_combo['w']}/{top_combo['g']})\n"
+            "🟢🔥💰🔥💰🔥💰🔥🟢\n\n")
+
     # Nivel de confianza según la fuerza del favorito (calibrado con el histórico).
     bloque_conf = ""
     if fav and fav_score >= config.CONF_HIGH:
@@ -118,7 +130,8 @@ def format_match(meta: dict, a: dict, edges: list = None, elo: dict = None,
         bloque_edge = ("🚨 <b>ON FIRE</b> (según nuestros datos)\n"
                        + "\n".join(edges) + "\n\n")
 
-    msg = titulo + reloj + "\n" + teams + "\n" + bloque_conf + bloque_edge + linea_score + cuerpo
+    msg = (titulo + reloj + "\n" + teams + "\n" + bloque_top + bloque_conf
+           + bloque_edge + linea_score + cuerpo)
     if h["matches"]:
         msg += (
             f"⚽ Goles H2H: prom <b>{_num(h['avg_total_goals'])}</b> · "

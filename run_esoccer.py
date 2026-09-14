@@ -16,6 +16,7 @@ import backtest
 import config
 import persistence
 import reports
+import team_ratings
 from esb_source import ESBSource, match_pairs
 from esb_score import analyze_match
 from formatter import format_match
@@ -74,6 +75,7 @@ def main():
         nuevos = 0
         edge_views = None   # stats acumuladas, se cargan una vez por ciclo (perezoso)
         hour_tbl = None     # temperatura por franja horaria (se calcula una vez)
+        top_combos = None   # {(jugador, equipo): fila} del TOP 50 (oportunidades)
         for p in pairs:
             mid = str(p.get("match_id"))
             if mid in seen or not p.get("player1") or not p.get("player2"):
@@ -93,6 +95,8 @@ def main():
                 if edge_views is None:
                     edge_views = analytics.load_views()
                     hour_tbl = analytics.hour_table(edge_views)
+                    top_combos = {(r["player"], r["team"]): r
+                                  for r in team_ratings.top(min_games=10, limit=50)}
                 hora = None
                 sc = analytics._parse(p.get("date"))
                 if sc:
@@ -106,6 +110,15 @@ def main():
                         hour_stat = {"hora": hora, **hs}
             except Exception as e:
                 print(f"[WARN] detect_edges {mid}: {e}", file=sys.stderr)
+
+            # ¿El favorito juega con un equipo del TOP 50? → oportunidad destacada.
+            top_hit = None
+            fav = a.get("favored")
+            if fav and top_combos:
+                fteam = (p.get("team1") if fav == p["player1"]
+                         else (p.get("team2") if fav == p["player2"] else None))
+                if fteam:
+                    top_hit = top_combos.get((fav, fteam))
             # Foto pre-partido de Elo (para mostrar junto al score y comparar).
             elo_snap = None
             try:
@@ -114,7 +127,7 @@ def main():
             except Exception as e:
                 print(f"[WARN] elo.snapshot {mid}: {e}", file=sys.stderr)
             msg_id = notifier.send(format_match(p, a, edges=edges, elo=elo_snap,
-                                                hour_stat=hour_stat))   # enviar primero → obtener message_id
+                                                hour_stat=hour_stat, top_combo=top_hit))   # enviar primero → obtener message_id
             rec = persistence.save_analysis(p, a, message_id=msg_id, elo=elo_snap)
             pending.append(rec)
             nuevos += 1
