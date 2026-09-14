@@ -42,6 +42,7 @@ def load_views():
             continue
         res = rec.get("result") or {}
         start = _parse(rec.get("date"))
+        feat = rec.get("features") or {}
         views.append({
             "match_id": rec.get("match_id"),
             "start_col": start.astimezone(_COL) if start else None,
@@ -50,6 +51,7 @@ def load_views():
             "p2": rec.get("player2"), "t2": rec.get("team2"),
             "favored": rec.get("favored"),
             "score_a": rec.get("score_a"),
+            "elo_exp_a": feat.get("elo_exp_a"),   # prob. Elo de que gane p1 (si existe)
             "outcome": res.get("outcome"),
             "hit": res.get("hit"),
             "winner": res.get("winner"),
@@ -356,6 +358,41 @@ def detect_edges(views, p1, t1, p2, t2, hour,
         if n >= min_form and wr >= min_wr:
             edges.append(f"📈 <b>{player}</b> en racha: {w}/{n} recientes")
     return edges
+
+
+def elo_calibration(views):
+    """¿La probabilidad del Elo predice? Por banda de prob. del favorito-Elo, % real.
+
+    Independiente del Score: define el favorito por Elo (exp>=0.5) y mira si ganó.
+    Solo cuenta partidos con features (elo_exp_a) y con desenlace decidible.
+    """
+    agg = {b: {"n": 0, "hit": 0} for b in _BANDAS}
+    for v in views:
+        if v["outcome"] not in _CONPICK:
+            continue
+        e = v.get("elo_exp_a")
+        if e is None:
+            continue
+        if e >= 0.5:
+            prob, fav = e, v["p1"]
+        else:
+            prob, fav = 1 - e, v["p2"]
+        pct = prob * 100
+        for b in _BANDAS:
+            if b[0] <= pct < b[1]:
+                agg[b]["n"] += 1
+                if v["winner"] == fav:
+                    agg[b]["hit"] += 1
+                break
+    out = []
+    for b in _BANDAS:
+        a = agg[b]
+        if a["n"] == 0:
+            continue
+        etq = f"{b[0]}–{b[1] - 1 if b[1] <= 100 else 100}"
+        out.append({"banda": etq, "n": a["n"],
+                    "tasa": round(100 * a["hit"] / a["n"])})
+    return out
 
 
 def goals_summary(views):

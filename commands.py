@@ -47,6 +47,8 @@ _HELP = (
     "/equipos &lt;jugador&gt; — con qué equipos rinde ese jugador\n"
     "/detalle_jugadores — lista de jugadores (toca uno para su perfil)\n"
     "/&lt;nick&gt; — estadísticas personales de un jugador\n"
+    "/calibracion — ¿a más Score/Elo, más acierto?\n"
+    "/horas_calientes — franjas donde el favorito gana más/menos\n"
     "/excel — Excel jugador-equipo al momento\n"
     "/dataset — CSV para el modelo (features + resultados)\n"
     "/glosario — qué significa cada dato de la tarjeta\n"
@@ -109,6 +111,10 @@ def _texts_for(cmd, arg="", rawarg="", raw_cmd=""):
         return "excel", None
     if cmd in ("dataset", "datos"):
         return "dataset", None
+    if cmd in ("calibracion", "calibration", "calib"):
+        return "text", [reports.text_calibration()]
+    if cmd in ("horas_calientes", "horascalientes", "horas", "hothours"):
+        return "text", [reports.text_hot_hours()]
     # listado de jugadores (cada uno como /<nick>)
     if cmd in ("detalle_jugadores", "detallejugadores", "lista_jugadores",
                "jugadores_lista", "lista"):

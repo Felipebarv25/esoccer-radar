@@ -9,7 +9,7 @@ Es INFO observada de lo ya jugado, no un pronóstico.
 import concurrent.futures
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -17,6 +17,14 @@ import elo
 from esb_source import ESBSource, _PLAYED_TOURNAMENTS, career_summary
 
 _DIAS_MES = 30.44
+_COL = timezone(timedelta(hours=-5))
+
+
+def _hour_col(iso):
+    try:
+        return datetime.fromisoformat((iso or "").replace("Z", "+00:00")).astimezone(_COL).hour
+    except Exception:
+        return None
 
 
 def known_players() -> set:
@@ -116,6 +124,7 @@ def build(nick: str, source: ESBSource = None, max_tournaments: int = 40,
 
     per_team = defaultdict(lambda: {"g": 0, "w": 0, "gf": 0, "ga": 0})
     per_opp = defaultdict(lambda: {"g": 0, "w": 0, "l": 0})
+    per_hour = defaultdict(lambda: {"g": 0, "w": 0})
     tot = {"g": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0}
     mdates = []
     low = nick.lower()
@@ -148,6 +157,11 @@ def build(nick: str, source: ESBSource = None, max_tournaments: int = 40,
                 o["g"] += 1; o["w"] += won; o["l"] += (sm < so)
                 if m.get("date"):
                     mdates.append(m["date"])
+                    h = _hour_col(m["date"])
+                    if h is not None:
+                        ph = per_hour[h]
+                        ph["g"] += 1
+                        ph["w"] += (1 if won else 0)
 
     # 3) carrera total (histórico completo) + Elo
     career = None
@@ -158,7 +172,7 @@ def build(nick: str, source: ESBSource = None, max_tournaments: int = 40,
     elo_r, elo_g = elo.get(nick)
 
     return {"nick": nick, "tot": tot, "per_team": dict(per_team),
-            "per_opp": dict(per_opp), "career": career,
+            "per_opp": dict(per_opp), "per_hour": dict(per_hour), "career": career,
             "elo": round(elo_r), "elo_games": elo_g,
             "oldest": oldest or (min(mdates) if mdates else None),
             "n_tournaments": len(tids)}
@@ -223,6 +237,22 @@ def format_profile(p: dict) -> str:
         L.append("\n😰 <b>Se le complican</b>:")
         for n, o, wr_ in dificiles[:5]:
             L.append(f"• {n} — solo gana {round(100 * wr_)}% ({o['w']}/{o['g']})")
+
+    # horas calientes/frías del jugador (mín. 4 partidos por franja; con umbral)
+    horas = [(h, d, d["w"] / d["g"]) for h, d in p.get("per_hour", {}).items()
+             if d["g"] >= 4]
+    buenas = sorted((x for x in horas if x[2] >= 0.55),
+                    key=lambda x: (x[2], x[1]["g"]), reverse=True)[:4]
+    malas = sorted((x for x in horas if x[2] <= 0.45),
+                   key=lambda x: (x[2], -x[1]["g"]))[:4]
+    if buenas:
+        L.append("\n⏰ <b>Horas donde rinde mejor</b> (COL):")
+        for h, d, wr_ in buenas:
+            L.append(f"• {h:02d}:00 — {round(100 * wr_)}% ({d['w']}/{d['g']})")
+    if malas:
+        L.append("🥶 <b>Horas donde rinde peor</b> (COL):")
+        for h, d, wr_ in malas:
+            L.append(f"• {h:02d}:00 — {round(100 * wr_)}% ({d['w']}/{d['g']})")
 
     L.append("\n<i>Datos observados de lo ya jugado, no pronóstico. "
              "Muestra reciente (últimos torneos) salvo la carrera total.</i>")

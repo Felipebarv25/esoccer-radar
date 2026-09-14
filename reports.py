@@ -414,6 +414,51 @@ def glossary_messages():
     return [m1, m2]
 
 
+def _fmt_calib_board(rows, titulo):
+    if not rows:
+        return f"<b>{titulo}</b>\nSin datos suficientes aún."
+    lineas = [f"<b>{titulo}</b>"]
+    for r in rows:
+        lineas.append(f"• {r['banda']} → acierta {r['tasa']}% (n={r['n']})")
+    return "\n".join(lineas)
+
+
+def text_calibration() -> str:
+    """Calibración del Score y del Elo: ¿a más confianza, más acierto? /calibracion."""
+    views = analytics.load_views()
+    sc = analytics.score_calibration(views)
+    el = analytics.elo_calibration(views)
+    cab = ("📐 <b>Calibración</b> — ¿a mayor confianza, más acierto?\n"
+           "<i>Si la tasa SUBE con la banda, el indicador tiene señal y conviene "
+           "apostar solo a los picks altos.</i>")
+    return _join([
+        cab,
+        _fmt_calib_board(sc, "🧮 Por banda de Score (fuerza del favorito)"),
+        _fmt_calib_board(el, "🔢 Por banda de probabilidad del Elo"),
+        "<i>El Elo solo cubre partidos recientes (con features). El Score cubre "
+        "todo el histórico guardado.</i>",
+        _NOTA,
+    ])
+
+
+def text_hot_hours(min_n: int = 8) -> str:
+    """Horas calientes: franjas donde el favorito gana más/menos. /horas_calientes."""
+    views = analytics.load_views()
+    rows = analytics.hour_board(views, min_n=min_n)  # sorted por tasa desc
+    if not rows:
+        return ("🔥 <b>Horas calientes</b>\nAún no hay suficientes partidos por "
+                f"franja (mínimo {min_n} por hora). Se llena con el tiempo.")
+    calientes = rows[:6]
+    frias = sorted(rows, key=lambda r: r["tasa"])[:6]
+    L = ["🔥 <b>Horas calientes</b> (hora Colombia)",
+         "% de acierto al favorito por franja horaria:",
+         "\n🟢 <b>Más predecibles</b> (el favorito gana más):"]
+    L += [f"• {r['franja']} — {r['tasa']}% (n={r['n']})" for r in calientes]
+    L.append("\n🔴 <b>Menos predecibles</b> (más sorpresas):")
+    L += [f"• {r['franja']} — {r['tasa']}% (n={r['n']})" for r in frias]
+    return _join(["\n".join(L), _NOTA])
+
+
 def text_combos(min_n: int = 2, top: int = 12) -> str:
     """Ranking global de duplas jugador+equipo (mejores y peores). Para /equipos."""
     views = analytics.load_views()
