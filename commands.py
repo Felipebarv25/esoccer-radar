@@ -35,7 +35,8 @@ def _safe(fn, *args):
 
 _HELP = (
     "🤖 <b>eSoccer Radar — comandos</b>\n\n"
-    "/hora — resumen de la última hora\n"
+    "/hora — resumen de la última hora completa\n"
+    "/horaactual — resumen de la hora en curso\n"
     "/dia — análisis profundo del día (ahora)\n"
     "/semana — tasa de acierto (últimos 7 días)\n"
     "/quincena — tasa (últimos 15 días)\n"
@@ -93,6 +94,8 @@ def _texts_for(cmd, arg="", rawarg="", raw_cmd=""):
         return "text", reports.glossary_messages()
     if cmd in ("hora", "hour"):
         return "text", [reports.text_last_hour()]
+    if cmd in ("horaactual", "ahora", "actual", "estahora", "horaencurso"):
+        return "text", [reports.text_current_hour()]
     if cmd in ("dia", "day"):
         return "text", [reports.text_rate("del día", reports.since_today_utc()),
                         reports.build_daily_deep()]

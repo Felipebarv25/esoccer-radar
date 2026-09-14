@@ -237,15 +237,15 @@ def _join(bloques) -> str:
     return "\n\n".join(b for b in bloques if b)
 
 
-def build_hourly(win_start, win_end):
+def build_hourly(win_start, win_end, titulo=None):
     """Texto del resumen de una hora [win_start, win_end) COL. None si 0 partidos."""
     views = analytics.load_views()
     ventana = analytics.in_window(views, win_start, win_end)
     sb = analytics.scoreboard(ventana)
     if sb["analizados"] == 0:
         return None
-    cab = (f"🕐 <b>Reporte {win_start:%H:%M}–{win_end:%H:%M}</b> "
-           f"(hora Colombia, {win_start:%d/%m})")
+    cab = titulo or (f"🕐 <b>Reporte {win_start:%H:%M}–{win_end:%H:%M}</b> "
+                     f"(hora Colombia, {win_start:%d/%m})")
     return _join([
         cab,
         _fmt_scoreboard(sb),
@@ -327,6 +327,18 @@ def text_last_hour() -> str:
     win_start = win_end - timedelta(hours=1)
     return build_hourly(win_start, win_end) or (
         f"🕐 Sin partidos con marcador entre {win_start:%H:%M} y {win_end:%H:%M} COL.")
+
+
+def text_current_hour() -> str:
+    """Resumen de la hora EN CURSO (de la hora en punto hasta ahora). /horaactual."""
+    now = datetime.now(_COL)
+    win_start = now.replace(minute=0, second=0, microsecond=0)
+    titulo = (f"🕐 <b>Hora en curso {win_start:%H:%M}–{now:%H:%M}</b> "
+              f"(hora Colombia, {now:%d/%m})")
+    txt = build_hourly(win_start, now + timedelta(minutes=1), titulo=titulo)
+    return txt or (f"🕐 Aún no hay partidos analizados en la hora en curso "
+                   f"({win_start:%H:%M}–{now:%H:%M} COL). Ojo: muchos siguen "
+                   f"abiertos — cada partido se cierra ~12 min tras empezar.")
 
 
 def text_top_players(label: str, since_utc, min_n: int = 2, top: int = 10) -> str:
