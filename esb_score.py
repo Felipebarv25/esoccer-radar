@@ -20,7 +20,7 @@ from esb_source import career_summary
 # Sin dato de equipo (o apagado): 60% carrera + 40% H2H (score original).
 WEIGHTS = {"win_rate": 0.6, "h2h": 0.4}
 # Con dato de equipo suficiente: se reparte para que el equipo mueva el score.
-WEIGHTS_TEAM = {"win_rate": 0.4, "h2h": 0.3, "team": 0.3}
+WEIGHTS_TEAM = {"win_rate": 0.2, "h2h": 0.4, "team": 0.4}
 MIN_TEAM_GAMES = 5   # mínimo de partidos con ese equipo para que cuente
 
 
