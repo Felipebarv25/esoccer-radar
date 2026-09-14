@@ -79,7 +79,8 @@ def main():
                 continue
             seen.add(mid)
             try:
-                a = analyze_match(source, p["player1"], p["player2"])
+                a = analyze_match(source, p["player1"], p["player2"],
+                                  team_a=p.get("team1"), team_b=p.get("team2"))
             except Exception as e:
                 print(f"[WARN] no pude analizar {p['player1']} vs {p['player2']}: {e}",
                       file=sys.stderr)

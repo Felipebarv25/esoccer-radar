@@ -65,6 +65,9 @@ def build_features(meta: dict, analysis: dict, elo: dict = None) -> dict:
             "elo_exp_a": elo.get("exp_a"),
             "elo_games_a": elo.get("games_a"), "elo_games_b": elo.get("games_b"),
         })
+    td = analysis.get("team_detail") or {}
+    feats["team_wr_a"] = td.get("wr_a")
+    feats["team_wr_b"] = td.get("wr_b")
     return feats
 
 

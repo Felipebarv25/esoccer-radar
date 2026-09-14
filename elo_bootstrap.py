@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 
 import elo
+import team_ratings
 from esb_source import ESBSource, _PLAYED_TOURNAMENTS
 
 
@@ -103,7 +104,9 @@ def run(days: int = 30, max_pages: int = 400, workers: int = 5):
                     n1, n2 = p1.get("nickname"), p2.get("nickname")
                     if None in (s1, s2, n1, n2):
                         continue
-                    matches.append((m.get("date", ""), m.get("id"), n1, n2, s1, s2))
+                    t1 = (p1.get("team") or {}).get("token_international")
+                    t2 = (p2.get("team") or {}).get("token_international")
+                    matches.append((m.get("date", ""), m.get("id"), n1, n2, s1, s2, t1, t2))
             except Exception:
                 pass
             if done % 50 == 0 or done == len(futs):
@@ -111,15 +114,17 @@ def run(days: int = 30, max_pages: int = 400, workers: int = 5):
 
     # 3) aplicar en orden cronológico — EN MEMORIA, guardando UNA vez al final
     matches.sort(key=lambda x: x[0])
-    _log(f"[BOOT] aplicando {len(matches)} partidos al Elo...")
+    _log(f"[BOOT] aplicando {len(matches)} partidos a Elo + team_ratings...")
     applied = 0
-    for i, (_date, mid, n1, n2, s1, s2) in enumerate(matches, 1):
+    for i, (_date, mid, n1, n2, s1, s2, t1, t2) in enumerate(matches, 1):
         winner = n1 if s1 > s2 else (n2 if s2 > s1 else None)
         if elo.record(n1, n2, winner, match_id=mid, save=False):
             applied += 1
+        team_ratings.record(n1, t1, n2, t2, winner, match_id=mid, save=False)
         if i % 10000 == 0:
             _log(f"[BOOT]   {i}/{len(matches)}")
-    elo.flush()  # una sola escritura a disco
+    elo.flush()
+    team_ratings.flush()
     _log(f"[BOOT] {len(matches)} partidos con marcador · {applied} nuevos aplicados")
 
     _log("\n=== TOP 20 por Elo ===")

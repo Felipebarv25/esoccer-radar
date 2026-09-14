@@ -16,6 +16,9 @@ TELEGRAM_REPORTS_CHAT_ID = os.getenv("TELEGRAM_REPORTS_CHAT_ID", "").strip() or 
 TELEGRAM_OWNER_ID = os.getenv("TELEGRAM_OWNER_ID", "").strip()
 # Cada cuánto se consulta la lista de próximos partidos.
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
+# ¿El Score usa el win% del jugador CON el equipo que va a usar? (prueba A/B).
+# Poner SCORE_USE_TEAM=0 en .env para volver al Score anterior (60% carrera/40% H2H).
+SCORE_USE_TEAM = os.getenv("SCORE_USE_TEAM", "1").strip().lower() not in ("0", "false", "no", "")
 
 _PLACEHOLDERS = {"", "pega_aqui_el_token_del_bot_nuevo", "pega_aqui_el_id_del_canal"}
 

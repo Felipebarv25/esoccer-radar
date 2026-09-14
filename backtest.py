@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import elo
 import persistence
+import team_ratings
 
 END_BUFFER_MIN = 12    # esperar tras el inicio a que termine (partido + lag)
 GIVEUP_MIN = 180       # si no aparece resultado, rendirse
@@ -84,6 +85,13 @@ def process(source, notifier, pending: list) -> list:
                        match_id=rec["match_id"])
         except Exception as e:
             print(f"[WARN] elo.record {rec['match_id']}: {e}", file=sys.stderr)
+        # Actualizar rendimiento por (jugador, equipo).
+        try:
+            team_ratings.record(rec["player1"], rec.get("team1"),
+                                rec["player2"], rec.get("team2"),
+                                result["winner"], match_id=rec["match_id"])
+        except Exception as e:
+            print(f"[WARN] team_ratings.record {rec['match_id']}: {e}", file=sys.stderr)
         if rec.get("message_id"):
             notifier.send(_format_close(rec, result, outcome), reply_to=rec["message_id"])
         print(f"[CLOSE] {rec['player1']} vs {rec['player2']} → {outcome} "

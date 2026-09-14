@@ -80,6 +80,14 @@ def format_match(meta: dict, a: dict, edges: list = None, elo: dict = None) -> s
                         f"{html.escape(B)} {elo.get('elo_b')} → esperado "
                         f"{html.escape(fav_elo)} {prob}%{aviso}\n")
 
+    # Equipo: cómo le va a cada uno CON el equipo que usa (si entró al score)
+    td = a.get("team_detail")
+    if td:
+        linea_score += (f"🏟️ <b>Equipo:</b> {html.escape(A)} con "
+                        f"{html.escape(str(td['team_a']))} {round(100 * td['wr_a'])}% "
+                        f"· {html.escape(B)} con {html.escape(str(td['team_b']))} "
+                        f"{round(100 * td['wr_b'])}%\n")
+
     teams = f"🏳️ {html.escape(str(meta.get('team1','?')))} vs {html.escape(str(meta.get('team2','?')))}\n"
     cuerpo = (
         f"👤 Carrera win%: {A} {_pct(ca['win_rate'])} · {B} {_pct(cb['win_rate'])}\n"
