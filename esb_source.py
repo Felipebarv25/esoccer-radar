@@ -117,8 +117,10 @@ class ESBSource:
                 break
             total_pages = data.get("totalPages", 1)
             for t in data.get("tournaments", []):
-                if t.get("status_id") in _PLAYED_TOURNAMENTS:
-                    continue  # ya jugado: aquí buscamos los PRÓXIMOS
+                if t.get("status_id") == _FINISHED_TOURNAMENT:
+                    continue  # solo saltamos los 100% terminados (status 3, raro)
+                # OJO: NO saltar status 4 (en curso) — ahí están los próximos
+                # partidos de 2x5/2x6 que aún no empiezan (status_id de match == 1).
                 ttype = match_type(t.get("token_international"))
                 tid = t["id"]
                 tm = self._cached(

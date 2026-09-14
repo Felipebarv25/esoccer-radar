@@ -50,6 +50,7 @@ _HELP = (
     "/calibracion — ¿a más Score/Elo, más acierto?\n"
     "/confianza — tasa por nivel (⭐⭐ alta / ⭐ media / baja)\n"
     "/horas_calientes — franjas donde el favorito gana más/menos\n"
+    "/jugadores_horas — jugadores letales en su hora caliente\n"
     "/excel — Excel jugador-equipo al momento\n"
     "/dataset — CSV para el modelo (features + resultados)\n"
     "/glosario — qué significa cada dato de la tarjeta\n"
@@ -118,6 +119,8 @@ def _texts_for(cmd, arg="", rawarg="", raw_cmd=""):
         return "text", [reports.text_confidence()]
     if cmd in ("horas_calientes", "horascalientes", "horas", "hothours"):
         return "text", [reports.text_hot_hours()]
+    if cmd in ("jugadores_horas", "jugadoreshoras", "letales"):
+        return "text", [reports.text_players_hot_hours()]
     # listado de jugadores (cada uno como /<nick>)
     if cmd in ("detalle_jugadores", "detallejugadores", "lista_jugadores",
                "jugadores_lista", "lista"):

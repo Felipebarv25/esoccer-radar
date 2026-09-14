@@ -469,6 +469,30 @@ def text_confidence() -> str:
     ])
 
 
+def text_players_hot_hours(min_games: int = 3, top: int = 15) -> str:
+    """Jugadores con mejor win% en su MEJOR franja horaria. /jugadores_horas."""
+    rows = analytics.player_hour_rows(analytics.load_views())
+    best = {}
+    for r in rows:
+        if r["partidos"] < min_games:
+            continue
+        cur = best.get(r["jugador"])
+        if (cur is None or r["win_%"] > cur["win_%"]
+                or (r["win_%"] == cur["win_%"] and r["partidos"] > cur["partidos"])):
+            best[r["jugador"]] = r
+    ranked = sorted(best.values(), key=lambda r: (r["win_%"], r["partidos"]),
+                    reverse=True)[:top]
+    if not ranked:
+        return ("🔥⏰ <b>Jugadores en su hora caliente</b>\nAún no hay suficientes "
+                f"datos (mínimo {min_games} partidos por jugador+hora). Se llena "
+                "con el tiempo.")
+    L = ["🔥⏰ <b>Jugadores más letales en su hora caliente</b> (hora COL)"]
+    for r in ranked:
+        L.append(f"• {r['jugador']} — a las {r['hora']}: {r['win_%']}% "
+                 f"({r['G']}/{r['partidos']})")
+    return _join(["\n".join(L), _NOTA])
+
+
 def text_hot_hours(min_n: int = 8) -> str:
     """Horas calientes: franjas donde el favorito gana más/menos. /horas_calientes."""
     views = analytics.load_views()
