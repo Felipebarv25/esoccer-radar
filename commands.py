@@ -45,6 +45,7 @@ _HELP = (
     "/peores [semana|quincena|mes] — peores jugadores\n"
     "/equipos — mejores/peores duplas jugador+equipo\n"
     "/equipos &lt;jugador&gt; — con qué equipos rinde ese jugador\n"
+    "/top_equipos — top 30 duplas jugador+equipo por win%\n"
     "/detalle_jugadores — lista de jugadores (toca uno para su perfil)\n"
     "/&lt;nick&gt; — estadísticas personales de un jugador\n"
     "/calibracion — ¿a más Score/Elo, más acierto?\n"
@@ -121,6 +122,10 @@ def _texts_for(cmd, arg="", rawarg="", raw_cmd=""):
         return "text", [reports.text_hot_hours()]
     if cmd in ("jugadores_horas", "jugadoreshoras", "letales"):
         return "text", [reports.text_players_hot_hours()]
+    if cmd in ("top_equipos", "topequipos", "top_jugador_equipo", "top30",
+               "mejores_duplas", "topduplas"):
+        mg = int(arg) if arg.isdigit() else 10
+        return "text", [reports.text_top_player_team(min_games=mg)]
     # listado de jugadores (cada uno como /<nick>)
     if cmd in ("detalle_jugadores", "detallejugadores", "lista_jugadores",
                "jugadores_lista", "lista"):

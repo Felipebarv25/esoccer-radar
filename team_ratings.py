@@ -81,3 +81,16 @@ def record(p1, t1, p2, t2, winner, match_id=None, save=True):
 
 def flush():
     _save()
+
+
+def top(min_games=10, limit=30):
+    """Combos (jugador, equipo) con mejor win%, con mínimo de partidos."""
+    rows = []
+    for key, e in _load()["pt"].items():
+        if e["g"] < min_games or "|" not in key:
+            continue
+        player, team = key.split("|", 1)
+        rows.append({"player": player, "team": team, "g": e["g"], "w": e["w"],
+                     "wr": round(100 * e["w"] / e["g"])})
+    rows.sort(key=lambda r: (r["wr"], r["g"]), reverse=True)
+    return rows[:limit]
