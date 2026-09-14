@@ -59,6 +59,18 @@ def process(source, notifier, pending: list) -> list:
             if now > md + timedelta(minutes=GIVEUP_MIN):
                 persistence.set_result(rec, {"outcome": "sin_datos",
                                              "closed_at": now.isoformat()})
+                # Avisar bajo la alerta para que NUNCA quede en silencio.
+                if rec.get("message_id"):
+                    tipo = rec.get("match_type")
+                    cab = f"eSoccer{f' ({tipo})' if tipo else ''}"
+                    notifier.send(
+                        f"⚠️ <b>Sin confirmar</b> — la fuente no entregó el "
+                        f"marcador de este partido.\n🏁 {cab}: "
+                        f"{rec['player1']} vs {rec['player2']} "
+                        f"(no cuenta para la tasa de acierto).",
+                        reply_to=rec["message_id"])
+                print(f"[NODATA] {rec['player1']} vs {rec['player2']} → sin marcador",
+                      file=sys.stderr)
             else:
                 still.append(rec)
             continue
