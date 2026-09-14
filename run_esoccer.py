@@ -128,6 +128,34 @@ def main():
                 print(f"[WARN] elo.snapshot {mid}: {e}", file=sys.stderr)
             msg_id = notifier.send(format_match(p, a, edges=edges, elo=elo_snap,
                                                 hour_stat=hour_stat, top_combo=top_hit))   # enviar primero → obtener message_id
+
+            # Tarjeta-IMAGEN para las mejores oportunidades (⭐⭐ ALTA o 💎 TOP).
+            sc = a.get("score_a", 50)
+            fav_score = sc if sc >= 50 else 100 - sc
+            if config.CARD_IMAGE and (top_hit or (fav and fav_score >= config.CONF_HIGH)):
+                try:
+                    import card_image
+                    exp = (elo_snap or {}).get("exp_a")
+                    elo_prob = None
+                    if exp is not None:
+                        elo_prob = round(100 * (exp if fav == p["player1"] else 1 - exp))
+                    td = a.get("team_detail") or {}
+                    team_wr = None
+                    if td:
+                        team_wr = round(100 * (td["wr_a"] if fav == p["player1"] else td["wr_b"]))
+                    img = card_image.make_card({
+                        "tipo": f"({p.get('match_type')})" if p.get("match_type") else "",
+                        "hora": (hour_stat and f"{hour_stat['hora']:02d}:00") or "",
+                        "pa": p["player1"], "ta": p.get("team1"),
+                        "pb": p["player2"], "tb": p.get("team2"),
+                        "favored": fav, "fav_score": fav_score, "elo_prob": elo_prob,
+                        "team_wr": team_wr,
+                        "hour_tasa": (hour_stat or {}).get("tasa"),
+                        "level": "TOP" if top_hit else "ALTA",
+                    })
+                    notifier.send_photo(img, reply_to=msg_id)
+                except Exception as e:
+                    print(f"[WARN] card_image {mid}: {e}", file=sys.stderr)
             rec = persistence.save_analysis(p, a, message_id=msg_id, elo=elo_snap)
             pending.append(rec)
             nuevos += 1

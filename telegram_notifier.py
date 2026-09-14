@@ -28,6 +28,23 @@ class TelegramNotifier:
             print(f"[Telegram] doc excepción: {e}")
         return False
 
+    def send_photo(self, file_path: str, caption: str = "", reply_to: int = None) -> bool:
+        """Envía una imagen (tarjeta de oportunidad) como foto."""
+        url = f"https://api.telegram.org/bot{self.token}/sendPhoto"
+        payload = {"chat_id": self.chat_id, "caption": caption, "parse_mode": "HTML"}
+        if reply_to:
+            payload["reply_to_message_id"] = reply_to
+            payload["allow_sending_without_reply"] = True
+        try:
+            with open(file_path, "rb") as fh:
+                resp = requests.post(url, data=payload, files={"photo": fh}, timeout=60)
+            if resp.status_code == 200:
+                return True
+            print(f"[Telegram] foto error {resp.status_code}: {resp.text[:200]}")
+        except Exception as e:
+            print(f"[Telegram] foto excepción: {e}")
+        return False
+
     def send(self, text: str, reply_to: int = None, max_retries: int = 3):
         """Envía un mensaje. Devuelve el message_id (int) si sale bien, o None.
 

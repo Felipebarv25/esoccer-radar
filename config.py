@@ -22,6 +22,8 @@ SCORE_USE_TEAM = os.getenv("SCORE_USE_TEAM", "1").strip().lower() not in ("0", "
 # Umbrales de nivel de confianza (fuerza del favorito). Configurables sin tocar código.
 CONF_HIGH = int(os.getenv("CONF_HIGH", "70"))   # ⭐⭐ alta confianza
 CONF_MED = int(os.getenv("CONF_MED", "60"))     # ⭐ confianza media
+# Enviar tarjeta-IMAGEN (PNG con diseño) en los picks fuertes (ALTA/TOP). Requiere Pillow.
+CARD_IMAGE = os.getenv("CARD_IMAGE", "1").strip().lower() not in ("0", "false", "no", "")
 
 _PLACEHOLDERS = {"", "pega_aqui_el_token_del_bot_nuevo", "pega_aqui_el_id_del_canal"}
 
