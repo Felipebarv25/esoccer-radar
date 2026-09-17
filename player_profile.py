@@ -13,11 +13,87 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
+import analytics
 import elo
+import team_ratings
 from esb_source import ESBSource, _PLAYED_TOURNAMENTS, career_summary
 
 _DIAS_MES = 30.44
 _COL = timezone(timedelta(hours=-5))
+
+
+def build_fast(nick: str) -> str:
+    """Perfil INSTANTÁNEO desde datos en memoria (Elo + team_ratings + registros).
+
+    No llama a la API → respuesta inmediata. Los equipos salen de la tabla
+    sembrada con 33k partidos (rica); rivales/horas de nuestros registros (más
+    delgado). Para el detalle completo con API está /detalle <nick>.
+    """
+    ra, rg = elo.get(nick)
+    teams = team_ratings.teams_of(nick, min_games=2)
+    tot_g = sum(t["g"] for t in teams)
+    tot_w = sum(t["w"] for t in teams)
+    wr = round(100 * tot_w / tot_g) if tot_g else 0
+
+    # rivales y horas desde nuestros registros (instantáneo)
+    per_opp = defaultdict(lambda: {"g": 0, "w": 0})
+    per_hour = defaultdict(lambda: {"g": 0, "w": 0})
+    streak = []
+    for v in analytics.load_views():
+        if v["outcome"] not in ("acierto", "fallo", "empate"):
+            continue
+        if v["p1"] == nick:
+            opp, won = v["p2"], (v["winner"] == nick)
+        elif v["p2"] == nick:
+            opp, won = v["p1"], (v["winner"] == nick)
+        else:
+            continue
+        o = per_opp[opp]
+        o["g"] += 1
+        o["w"] += 1 if won else 0
+        if v["start_col"]:
+            h = per_hour[v["start_col"].hour]
+            h["g"] += 1
+            h["w"] += 1 if won else 0
+        streak.append((v["start_col"], "✅" if won else ("➖" if v["winner"] is None else "❌")))
+
+    L = [f"👤 <b>{nick}</b> · 🔢 Elo <b>{round(ra)}</b> ({rg} part.)"]
+    if tot_g:
+        L.append(f"📊 En el histórico: <b>{tot_g}</b> partidos · win <b>{wr}%</b>")
+
+    if teams:
+        L.append(f"\n🛡️ <b>Equipos con los que juega</b> ({len(teams)}) (win%):")
+        for t in teams[:14]:
+            seg = f" [{t['seg']}]" if t.get("seg") else ""
+            L.append(f"• {t['team']}{seg} — {t['wr']}% ({t['w']}/{t['g']})")
+
+    opps = [(n, o, o["w"] / o["g"]) for n, o in per_opp.items() if o["g"] >= 3]
+    faciles = sorted((x for x in opps if x[2] >= 0.60), key=lambda x: x[2], reverse=True)[:5]
+    dificiles = sorted((x for x in opps if x[2] <= 0.40), key=lambda x: x[2])[:5]
+    if faciles:
+        L.append("\n😀 <b>Les gana fácil</b> (nuestros datos):")
+        L += [f"• {n} — {round(100 * w)}% ({o['w']}/{o['g']})" for n, o, w in faciles]
+    if dificiles:
+        L.append("😰 <b>Se le complican</b>:")
+        L += [f"• {n} — solo gana {round(100 * w)}% ({o['w']}/{o['g']})" for n, o, w in dificiles]
+
+    horas = [(h, d, d["w"] / d["g"]) for h, d in per_hour.items() if d["g"] >= 4]
+    buenas = sorted((x for x in horas if x[2] >= 0.55), key=lambda x: x[2], reverse=True)[:3]
+    if buenas:
+        L.append("\n⏰ <b>Horas donde rinde mejor</b> (COL):")
+        L += [f"• {h:02d}:00 — {round(100 * w)}% ({d['w']}/{d['g']})" for h, d, w in buenas]
+
+    if streak:
+        streak.sort(key=lambda x: x[0] or datetime.min.replace(tzinfo=_COL), reverse=True)
+        L.append(f"\n📈 Racha reciente: {''.join(s for _, s in streak[:8])}")
+
+    L.append("\n<i>Instantáneo (datos en memoria). Para el detalle completo con la "
+             "API: /detalle " + nick + "</i>")
+    return "\n".join(L)
+
+
+def generate_fast(notifier, canon_nick):
+    notifier.send(build_fast(canon_nick))
 
 
 def _hour_col(iso):

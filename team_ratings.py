@@ -92,6 +92,19 @@ def flush():
     _save()
 
 
+def teams_of(player, min_games=1):
+    """Todos los equipos con los que ha jugado un jugador (win% · seg). Instantáneo."""
+    pref = player + "|"
+    rows = []
+    for key, e in _load()["pt"].items():
+        if not key.startswith(pref) or e["g"] < min_games:
+            continue
+        rows.append({"team": key.split("|", 1)[1], "g": e["g"], "w": e["w"],
+                     "wr": round(100 * e["w"] / e["g"]), "seg": dominant_seg(e)})
+    rows.sort(key=lambda r: r["g"], reverse=True)
+    return rows
+
+
 def top(min_games=10, limit=50):
     """Combos (jugador, equipo) con mejor win%, con mínimo de partidos."""
     rows = []

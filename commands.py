@@ -47,7 +47,8 @@ _HELP = (
     "/equipos &lt;jugador&gt; — con qué equipos rinde ese jugador\n"
     "/top_equipos — top 30 duplas jugador+equipo por win%\n"
     "/detalle_jugadores — lista de jugadores (toca uno para su perfil)\n"
-    "/&lt;nick&gt; — estadísticas personales de un jugador\n"
+    "/&lt;nick&gt; — perfil instantáneo del jugador\n"
+    "/detalle &lt;nick&gt; — perfil detallado (con API, más lento)\n"
     "/&lt;nick&gt;_Excel — Excel con TODOS los partidos del jugador\n"
     "/calibracion — ¿a más Score/Elo, más acierto?\n"
     "/confianza — tasa por nivel (⭐⭐ alta / ⭐ media / baja)\n"
@@ -181,10 +182,10 @@ def _texts_for(cmd, arg="", rawarg="", raw_cmd=""):
     elif cmd in ("peoresmes",):
         fn, periodo = reports.text_worst_players, "mes"
     else:
-        # ¿es el nick de un jugador? (al tocar /DEKSON en la lista)
+        # ¿es el nick de un jugador? (al tocar /DEKSON en la lista) → perfil instantáneo
         import player_profile
         if player_profile.resolve(raw_cmd):
-            return "profile", raw_cmd
+            return "quick_profile", raw_cmd
         return "unknown", None
     return "text", [_ranking(fn, periodo)]
 
@@ -258,8 +259,22 @@ def _deliver(target_chat, kind, payload):
             except Exception as e:
                 _send(target_chat, "No pude armar la agenda ahora, intenta luego.")
                 print(f"[WARN] /agenda: {e}", file=sys.stderr)
+    elif kind == "quick_profile":
+        import player_profile
+        canon = player_profile.resolve(payload)
+        if not canon:
+            cands = player_profile.candidates(payload)
+            _send(target_chat, ("🔎 ¿Cuál? " + " ".join(f"/{c}" for c in cands))
+                  if cands else f"No tengo datos de «{payload}».")
+        else:
+            try:
+                player_profile.generate_fast(TelegramNotifier(chat_id=target_chat), canon)
+            except Exception as e:
+                _send(target_chat, "No pude armar el perfil ahora.")
+                print(f"[WARN] quick_profile {canon}: {e}", file=sys.stderr)
     elif kind == "profile":
-        _send(target_chat, f"🔎 Buscando estadísticas de {payload}...")
+        _send(target_chat, f"🔎 Buscando estadísticas detalladas de {payload} "
+                           f"(consulto la API, unos segundos)...")
         try:
             import player_profile
             player_profile.generate_and_send(TelegramNotifier(chat_id=target_chat), payload)
