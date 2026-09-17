@@ -28,8 +28,13 @@ _SCHEDULED_MATCH = 1      # status_id de partido programado (aún no empieza)
 
 
 def match_type(token: str) -> str:
-    """Tipo de partido según el nombre del torneo/liga. Sin número = 2x4 (8 min)."""
-    t = token or ""
+    """Tipo de partido según el nombre del torneo/liga. Sin número = 2x4 (8 min).
+
+    Reconoce tanto "2x6"/"2x5" (latino) como "2х6"/"2х5" (cirílico 'х', como en el
+    token ruso). NOTA VERIFICADA (2026-09-17): el feed de esportsbattle SOLO trae
+    2x4 y 2x6 — no existe 2x5 en esta fuente.
+    """
+    t = (token or "").replace("х", "x")   # normaliza 'х' cirílico a 'x' latino
     if "2x6" in t:
         return "2x6"
     if "2x5" in t:

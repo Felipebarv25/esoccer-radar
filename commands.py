@@ -55,6 +55,8 @@ _HELP = (
     "/jugadores_horas — jugadores letales en su hora caliente\n"
     "/excel — Excel jugador-equipo al momento\n"
     "/agenda — Excel de próximos partidos (24h) por probabilidad\n"
+    "/grupos — ligas que se están jugando ahora + clima del mercado\n"
+    "/Nick_Equipo versus Nick2_Equipo2 — enfrentamiento con esos equipos\n"
     "/dataset — CSV para el modelo (features + resultados)\n"
     "/glosario — qué significa cada dato de la tarjeta\n"
     "/ayuda — esta lista\n\n"
@@ -119,6 +121,9 @@ def _texts_for(cmd, arg="", rawarg="", raw_cmd=""):
     if cmd in ("agenda", "manana", "mañana", "proximos", "calendario"):
         horas = int(arg) if arg.isdigit() else 24
         return "agenda", horas
+    if cmd in ("grupos", "ligas", "grupo", "jugandose"):
+        import groups
+        return "text", [groups.text_report(groups.get_or_compute())]
     if cmd in ("calibracion", "calibration", "calib"):
         return "text", [reports.text_calibration()]
     if cmd in ("confianza", "confidence", "niveles"):
@@ -208,13 +213,25 @@ def _deliver(target_chat, kind, payload):
     elif kind == "unknown":
         _send(target_chat, "❓ Comando no reconocido.\n\n" + _HELP)
     elif kind == "excel":
-        _send(target_chat, "📁 Generando Excel jugador-equipo, dame unos segundos...")
-        try:
-            import team_report
-            team_report.generate_and_send(TelegramNotifier(chat_id=target_chat))
-        except Exception as e:
-            _send(target_chat, "No pude generar el Excel ahora, intenta luego.")
-            print(f"[WARN] /excel: {e}", file=sys.stderr)
+        import report_cache
+        pe, ph = report_cache.path("equipo"), report_cache.path("hora")
+        n = TelegramNotifier(chat_id=target_chat)
+        if pe or ph:  # precomputado → instantáneo
+            if pe:
+                a = report_cache.age_min("equipo")
+                n.send_document(pe, f"📗 <b>Jugador–equipo</b> · {report_cache.rows('equipo')} "
+                                    f"combos · actualizado hace {a} min. Ábrelo en Excel.")
+            if ph:
+                n.send_document(ph, f"🕐 <b>Jugador–hora</b> · {report_cache.rows('hora')} "
+                                    f"filas · en qué franjas juega cada uno.")
+        else:  # aún no hay caché (primeros minutos tras arrancar) → generar
+            _send(target_chat, "📁 Generando Excel por primera vez, unos segundos...")
+            try:
+                import team_report
+                team_report.generate_and_send(n)
+            except Exception as e:
+                _send(target_chat, "No pude generar el Excel ahora, intenta luego.")
+                print(f"[WARN] /excel: {e}", file=sys.stderr)
     elif kind == "dataset":
         _send(target_chat, "🧠 Generando el dataset del modelo, dame unos segundos...")
         try:
@@ -224,15 +241,23 @@ def _deliver(target_chat, kind, payload):
             _send(target_chat, "No pude generar el dataset ahora, intenta luego.")
             print(f"[WARN] /dataset: {e}", file=sys.stderr)
     elif kind == "agenda":
-        _send(target_chat, "📅 Armando la agenda de próximos partidos, dame unos "
-                           "segundos (consulto la API)...")
-        try:
-            import agenda
-            agenda.generate_and_send(TelegramNotifier(chat_id=target_chat),
-                                     hours=payload or 24)
-        except Exception as e:
-            _send(target_chat, "No pude armar la agenda ahora, intenta luego.")
-            print(f"[WARN] /agenda: {e}", file=sys.stderr)
+        import report_cache
+        p = report_cache.path("agenda")
+        if p and payload in (None, 24):  # 24h precomputada → instantáneo
+            a = report_cache.age_min("agenda")
+            TelegramNotifier(chat_id=target_chat).send_document(
+                p, f"📅 <b>Agenda próximas 24h</b> · {report_cache.rows('agenda')} "
+                   f"partidos · actualizado hace {a} min · ordenada por probabilidad "
+                   f"(Elo). La columna ⭐TOP marca combos del top 50.")
+        else:  # horas custom o sin caché → generar en vivo
+            _send(target_chat, "📅 Armando la agenda, unos segundos (consulto la API)...")
+            try:
+                import agenda
+                agenda.generate_and_send(TelegramNotifier(chat_id=target_chat),
+                                         hours=payload or 24)
+            except Exception as e:
+                _send(target_chat, "No pude armar la agenda ahora, intenta luego.")
+                print(f"[WARN] /agenda: {e}", file=sys.stderr)
     elif kind == "profile":
         _send(target_chat, f"🔎 Buscando estadísticas de {payload}...")
         try:
@@ -263,10 +288,28 @@ def _deliver(target_chat, kind, payload):
             _send(target_chat, t)
 
 
+def _maybe_matchup(target_chat, text) -> bool:
+    """Detecta /Nick_Equipo versus Nick2_Equipo2 y entrega el reporte de enfrentamiento."""
+    low = f" {text.lower()} "
+    if not ((" versus " in low or " vs " in low) and "_" in text):
+        return False
+    try:
+        import player_h2h
+        player_h2h.generate_and_send(TelegramNotifier(chat_id=target_chat), text)
+    except Exception as e:
+        _send(target_chat, "No pude armar el enfrentamiento. Formato: "
+                           "<code>/Nick_Equipo versus Nick2_Equipo2</code>")
+        print(f"[WARN] matchup: {e}", file=sys.stderr)
+    return True
+
+
 def _handle_channel(chat_id, text):
     """Comando escrito DENTRO de un canal (solo el canal de reportes)."""
     if str(chat_id) != str(config.TELEGRAM_REPORTS_CHAT_ID):
         return  # ignorar comandos en otros canales
+    if _maybe_matchup(config.TELEGRAM_REPORTS_CHAT_ID, text):
+        print("[CMD] canal matchup", file=sys.stderr)
+        return
     cmd, arg, rawarg, raw_cmd = _split(text)
     kind, payload = _texts_for(cmd, arg, rawarg, raw_cmd)
     _deliver(config.TELEGRAM_REPORTS_CHAT_ID, kind, payload)  # responde en el mismo canal
@@ -275,11 +318,14 @@ def _handle_channel(chat_id, text):
 
 def _handle_private(chat_id, uid, text):
     """Comando por chat privado con el bot (autorizado por id de dueño)."""
-    cmd, arg, rawarg, raw_cmd = _split(text)
     if not _authorized(uid):
         _send(chat_id, "⛔ No autorizado.")
-        print(f"[CMD] rechazado uid={uid} cmd={cmd}", file=sys.stderr)
+        print(f"[CMD] rechazado uid={uid}", file=sys.stderr)
         return
+    if _maybe_matchup(config.TELEGRAM_REPORTS_CHAT_ID, text):
+        _send(chat_id, "✅ Enviado al canal de reportes.")
+        return
+    cmd, arg, rawarg, raw_cmd = _split(text)
     kind, payload = _texts_for(cmd, arg, rawarg, raw_cmd)
     if kind in ("help", "unknown"):
         _deliver(chat_id, kind, payload)               # ayuda/errores al privado

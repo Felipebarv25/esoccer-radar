@@ -42,6 +42,13 @@ def main():
     except Exception as e:
         print(f"[WARN] no pude iniciar comandos: {e}", file=sys.stderr)
 
+    # Precómputo en segundo plano de los Excel pesados (respuesta instantánea).
+    try:
+        import report_cache
+        report_cache.start()
+    except Exception as e:
+        print(f"[WARN] no pude iniciar report_cache: {e}", file=sys.stderr)
+
     # Vigilancia de salud: avisa al canal de reportes si la API se bloquea o
     # deja de emitir partidos por mucho tiempo.
     from watchdog import Watchdog
@@ -171,6 +178,7 @@ def main():
         # Reportes programados (van al canal de reportes, no al de análisis).
         try:
             reports.maybe_hourly(reports_notifier)       # resumen de cada hora
+            reports.maybe_groups_alert(reports_notifier)  # ligas en juego cada 15 min
             reports.maybe_send(reports_notifier)          # tasa + análisis profundo diario
             reports.maybe_team_report(reports_notifier)   # CSV jugador-equipo cada 2 días
         except Exception as e:

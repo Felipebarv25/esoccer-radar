@@ -88,6 +88,26 @@ def _save_state(st: dict) -> None:
         json.dump(st, fh)
 
 
+def maybe_groups_alert(notifier) -> None:
+    """Cada 15 min avisa qué ligas/grupos se están jugando ahora."""
+    now = datetime.now(_COL)
+    label = now.strftime("%Y-%m-%d-%H-") + str(now.minute // 15)
+    st = _load_state()
+    if st.get("groups_alert") == label:
+        return
+    try:
+        import groups
+        texto = groups.text_alert(groups.get_or_compute())
+    except Exception as e:
+        import sys
+        print(f"[WARN] groups_alert: {e}", file=sys.stderr)
+        texto = ""
+    if texto:
+        notifier.send(texto)
+    st["groups_alert"] = label
+    _save_state(st)
+
+
 def send_startup(notifier) -> None:
     """Reporte de arranque: confirma que el canal de reportes quedó conectado.
 
