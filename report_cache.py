@@ -62,9 +62,21 @@ def _loop():
         time.sleep(REFRESH_SECS)
 
 
+def _warm_loop():
+    """Mantiene caliente en memoria la vista de registros (lectura pesada fuera
+    del camino de los comandos) → todos los comandos quedan instantáneos."""
+    while True:
+        try:
+            analytics.load_views(force=True)
+        except Exception as e:
+            print(f"[WARN] warm views: {e}")
+        time.sleep(90)
+
+
 def start():
+    threading.Thread(target=_warm_loop, daemon=True).start()
     threading.Thread(target=_loop, daemon=True).start()
-    print("[CACHE] precómputo de Excel activo")
+    print("[CACHE] precómputo de Excel + caché de registros activos")
 
 
 def path(key):

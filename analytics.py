@@ -37,11 +37,12 @@ def _parse(iso):
 
 
 def load_views(force=False):
-    """Lee todos los registros y los normaliza a una vista uniforme (con caché TTL)."""
+    """Vista uniforme de los registros. Los comandos SIEMPRE usan la copia en
+    memoria (instantáneo); la lectura pesada de archivos solo ocurre cuando un
+    hilo de fondo llama force=True (o en el primer arranque)."""
+    if not force and _VIEWS_CACHE["data"] is not None:
+        return _VIEWS_CACHE["data"]   # nunca leemos disco en el camino del comando
     now = time.time()
-    if (not force and _VIEWS_CACHE["data"] is not None
-            and now - _VIEWS_CACHE["t"] < _VIEWS_TTL):
-        return _VIEWS_CACHE["data"]
     views = []
     for p in glob.glob(os.path.join(_DIR, "*.json")):
         try:
