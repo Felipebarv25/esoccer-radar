@@ -8,8 +8,13 @@ Devuelve: head-to-head total, H2H con ESOS equipos, últimos 10 con la combinaci
 promedio de goles, Over/BTTS, Elo esperado, win% de cada uno con su equipo y racha.
 Todo son datos observados, no un pronóstico.
 """
+import concurrent.futures
 import re
+import time
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
+
+import requests
 
 import analytics
 import elo
@@ -19,6 +24,9 @@ from esb_source import ESBSource
 
 _COL = timezone(timedelta(hours=-5))
 _SPLIT = re.compile(r"\s+(?:versus|vs)\s+", re.IGNORECASE)
+_CACHE = {}          # (a_low, b_low) -> (ts, matches)
+_CACHE_TTL = 900     # 15 min: el endpoint H2H de la API es lento (~6s), así que
+#                      la 1ª vez cuesta pero las repeticiones salen al instante.
 
 
 def parse_side(s: str):
@@ -36,14 +44,30 @@ def parse_side(s: str):
     return None, None
 
 
-def _h2h_matches(source, a, b, max_pages=6):
-    matches, page, total = [], 1, 1
-    while page <= min(max_pages, total):
+def _h2h_matches(source, a, b, pages=3, workers=3):
+    """Historial H2H. Cachea por pareja y baja las páginas EN PARALELO de una."""
+    key = (a.lower(), b.lower())
+    hit = _CACHE.get(key)
+    if hit and time.time() - hit[0] < _CACHE_TTL:
+        return hit[1]
+
+    headers = dict(source.session.headers)
+    url = f"{source.base}/participants/{quote(a)}/compare/{quote(b)}/matches"
+
+    def get(page):
         try:
-            data = source.compare_matches(a, b, page=page)
+            r = requests.get(url, headers=headers, params={"page": page}, timeout=20)
+            r.raise_for_status()
+            return r.json()
         except Exception:
-            break
-        total = data.get("totalPages", 1)
+            return {}
+
+    # pedimos las 3 páginas a la vez (ciegas) → el tiempo es el de la más lenta
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+        datas = list(ex.map(get, range(1, pages + 1)))
+
+    matches = []
+    for data in datas:
         for m in data.get("matches", []):
             p1, p2 = m.get("participant1", {}), m.get("participant2", {})
             s1, s2 = p1.get("score"), p2.get("score")
@@ -58,7 +82,7 @@ def _h2h_matches(source, a, b, max_pages=6):
                 tb = (p1.get("team") or {}).get("token_international")
                 sa, sb = s2, s1
             matches.append({"date": m.get("date"), "ta": ta, "tb": tb, "sa": sa, "sb": sb})
-        page += 1
+    _CACHE[key] = (time.time(), matches)
     return matches
 
 

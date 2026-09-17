@@ -308,6 +308,8 @@ def _maybe_matchup(target_chat, text) -> bool:
     low = f" {text.lower()} "
     if not ((" versus " in low or " vs " in low) and "_" in text):
         return False
+    _send(target_chat, "🔎 Analizando el enfrentamiento... (la 1ª vez tarda unos "
+                       "segundos; luego queda en caché)")
     try:
         import player_h2h
         player_h2h.generate_and_send(TelegramNotifier(chat_id=target_chat), text)
