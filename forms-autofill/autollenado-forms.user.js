@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Autollenado Microsoft Forms desde Excel (ML rutas)
 // @namespace    https://github.com/felipebarv25
-// @version      1.2.0
+// @version      1.3.0
 // @description  Carga un Excel (Código, Nombre del Cliente, Jefatura, Ruta, Descripción Canal, Territorio) y envía una respuesta del formulario por cada fila.
 // @match        https://forms.office.com/*
 // @match        https://forms.cloud.microsoft/*
@@ -108,13 +108,19 @@
     return items.filter((el) => el.offsetParent !== null);
   }
 
+  // Texto de accesibilidad que Forms agrega al título ("Texto de varias líneas.", "Opción única.", ...).
+  const SUFIJOS_TIPO = /(texto de (varias lineas|una sola linea)|eleccion multiple|opcion unica|opcion multiple|lista desplegable|calificacion|fecha|numero|multi-?line text|single line text|multiple choice|single choice|drop-?down|rating|date)\.?\s*$/;
+
   function tituloDe(q) {
     const t =
+      q.querySelector('[data-automation-id="questionTitle"] .text-format-content') ||
       q.querySelector('[data-automation-id="questionTitle"]') ||
       q.querySelector('.office-form-question-title') ||
       q.querySelector('[role="heading"]');
     let s = norm(t ? t.textContent : q.textContent.slice(0, 200));
-    return s.replace(/^\d+\s*[.)-]?\s*/, '').replace(/\*/g, '').trim();
+    s = s.replace(/^\d+\s*[.)-]?\s*/, '').replace(/\*/g, '').trim();
+    for (let i = 0; i < 2; i++) { const sin = s.replace(SUFIJOS_TIPO, '').trim(); if (sin) s = sin; }
+    return s.replace(/[:.]\s*$/, '').trim();
   }
 
   function esObligatoria(q) {
@@ -173,7 +179,9 @@
     let v = limpiar(valor);
     let tipo = 'exacta';
     if (EQUIV[v]) { v = limpiar(EQUIV[v]); tipo = 'equivalencia'; }
-    const ops = opciones.map((o) => ({ o, t: limpiar(o.texto) })).filter((x) => x.t);
+    // Cada opción puede tener varios textos (etiqueta, aria-label, value): se prueban todos.
+    const ops = [];
+    opciones.forEach((o) => (o.textos || [o.texto]).forEach((t) => { if (limpiar(t)) ops.push({ o, t: limpiar(t) }); }));
 
     const igual = ops.find((x) => x.t === v);
     if (igual) return { opcion: igual.o, tipo, parecido: 1 };
@@ -192,11 +200,23 @@
         return { ...x, p };
       })
       .sort((a, b) => b.p - a.p);
-    const [mejor, segundo] = puntajes;
+    const mejor = puntajes[0];
+    const segundo = mejor && puntajes.find((x) => x.o !== mejor.o);
     if (mejor && mejor.p >= SIMILITUD_MINIMA && (!segundo || mejor.p - segundo.p >= 0.05)) {
       return { opcion: mejor.o, tipo: tipo === 'equivalencia' ? 'equivalencia' : 'interpretada', parecido: mejor.p };
     }
     return null;
+  }
+
+  // La opción más parecida (para explicar por qué no se marcó nada).
+  function masCercana(opciones, valor) {
+    const v = limpiar(valor);
+    let best = null;
+    opciones.forEach((o) => (o.textos || [o.texto]).forEach((t) => {
+      const p = similitud(v, limpiar(t));
+      if (!best || p > best.p) best = { texto: o.texto.trim(), p };
+    }));
+    return best ? `más parecida: "${best.texto}" (${Math.round(best.p * 100)}%)` : 'el formulario no mostró opciones';
   }
 
   function mejorOpcion(opciones, valor, exacta) {
@@ -229,8 +249,11 @@
       return {
         tipo: 'opciones',
         opciones: choices.map((el) => {
-          const lab = el.closest('label') || el.closest('[data-automation-id="choiceItem"]') || el.parentElement;
-          return { texto: el.value || (lab ? lab.textContent : ''), el };
+          const lab = el.closest('[data-automation-id="choiceItem"]') || el.closest('label') || el.parentElement;
+          const textos = [lab && lab.textContent, el.getAttribute('aria-label'), el.value]
+            .map((t) => String(t || '').trim())
+            .filter((t, i, a) => t && t !== 'on' && a.indexOf(t) === i);
+          return { texto: textos[0] || '', textos, el };
         }),
       };
     }
@@ -265,7 +288,7 @@
       const m = mejorOpcion(sel.opciones, valor, exacta);
       if (!m) {
         if (sel.tipo === 'lista') { cerrarLista(); await sleep(200); }
-        throw new OpcionNoExiste(`no existe la opción "${valor}"`);
+        throw new OpcionNoExiste(`no existe la opción "${valor}" — ${masCercana(sel.opciones, valor)}`);
       }
       if (!(m.opcion.el.checked)) m.opcion.el.click();
       await sleep(150);
@@ -313,7 +336,7 @@
           m = await responder(q, r.valor, r.exacta);
         } catch (e) {
           if (r.exacta && e instanceof OpcionNoExiste) {
-            detalle.push(`— "${titulo}": "${r.valor}" no está en el formulario, se deja en blanco`);
+            detalle.push(`— "${titulo}": "${r.valor}" no está en el formulario, se deja en blanco (${e.message.split(' — ')[1] || ''})`);
             continue;
           }
           throw new Error(`"${titulo}": ${e.message}`);
@@ -467,14 +490,15 @@
       const grupos = { exacta: [], otra: [], no: [] };
       for (const [v, n] of Object.entries(cuenta).sort((a, b) => b[1] - a[1])) {
         const m = buscarOpcion(sel.opciones, v);
-        if (!m) grupos.no.push(`✘ ${v} (${n} filas) → queda en blanco`);
+        if (!m) grupos.no.push(`✘ ${v} (${n} filas) → queda en blanco; ${masCercana(sel.opciones, v)}`);
         else if (m.tipo === 'exacta') grupos.exacta.push(`✔ ${v} (${n})`);
         else grupos.otra.push(`≈ ${describir(v, m)} (${n} filas)`);
       }
       salida.push(`Pregunta "${tituloDe(q)}" — ${sel.opciones.length} opciones en el formulario`,
         `\nINTERPRETADOS (revisa que estén bien):`, ...(grupos.otra.length ? grupos.otra : ['(ninguno)']),
         `\nNO ESTÁN EN EL FORMULARIO:`, ...(grupos.no.length ? grupos.no : ['(ninguno)']),
-        `\nIGUALES:`, ...grupos.exacta);
+        `\nIGUALES:`, ...(grupos.exacta.length ? grupos.exacta : ['(ninguno)']),
+        `\nOPCIONES DEL FORMULARIO (${sel.opciones.length}):`, ...sel.opciones.map((o, i) => `${i + 1}. ${(o.textos || [o.texto]).join('  |  ')}`));
     }
     $('log').textContent = salida.join('\n');
     info('Validación lista (no se llenó ni envió nada). Revisa el recuadro de abajo.');
