@@ -12,13 +12,13 @@ Primera hoja, primera fila con estos encabezados (el orden no importa):
 
 La pregunta 2 ("el cliente es para") siempre se responde **Negociar**.
 
-La pregunta **Subcanal** se llena con la columna **Descripción Canal**:
-- Si ese canal existe entre las opciones del formulario, se marca **exactamente ese**
-  (sin buscar parecidos; `DROGUERIA` no se marca como `DROGUERÍA HM`).
-  Si Excel trae el nombre cortado (p. ej. `INSTITUCIONES Y OFICINAS (ENTIDADES PRIV`),
-  se marca la única opción que empieza igual.
-- Si no existe, el subcanal **se deja en blanco** y el resto de la respuesta se envía normal.
-  Al terminar, el panel lista qué filas se enviaron sin subcanal.
+La pregunta **Sub canal** es el **filtro**: se compara con la columna **Descripción Canal**.
+- Si el canal del Excel corresponde a una opción del formulario (igual, o con errores de escritura),
+  la encuesta de esa fila **se envía**.
+- Si no corresponde a ninguna opción (o está vacío), **esa fila se omite completa** (no se envía nada)
+  y se pasa a la siguiente. Al terminar, el panel lista las filas omitidas y por qué.
+- Si un canal omitido se parece bastante a una opción (60 % o más), se marca con ⚠ REVISA para
+  que decidas si es el mismo canal y lo agregues en `EQUIVALENCIAS`; así no se salta ninguna fila que sí pertenezca.
 
 ### Errores de escritura (en el Excel o en el formulario)
 
@@ -38,7 +38,7 @@ const EQUIVALENCIAS = {
 
 **Botón "Validar canales":** antes de enviar, compara todos los canales del Excel con las opciones
 del formulario (sin llenar ni enviar nada) y muestra: cuáles son iguales, cuáles se **interpretaron**
-(con el % de parecido, para que confirmes) y cuáles **no están** y quedarán en blanco.
+(con el % de parecido, para que confirmes) y cuáles **no están** (esas filas se omiten), con el resumen de cuántas filas se enviarán y cuántas se omiten.
 
 ## Instalación (una sola vez, ~3 minutos)
 

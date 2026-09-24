@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Autollenado Microsoft Forms desde Excel (ML rutas)
 // @namespace    https://github.com/felipebarv25
-// @version      1.3.0
+// @version      1.4.0
 // @description  Carga un Excel (Código, Nombre del Cliente, Jefatura, Ruta, Descripción Canal, Territorio) y envía una respuesta del formulario por cada fila.
 // @match        https://forms.office.com/*
 // @match        https://forms.cloud.microsoft/*
@@ -26,9 +26,9 @@
   //   pregunta: texto (o expresión regular) que aparece en el título de la pregunta
   //   columna:  encabezado de la columna del Excel de donde sale la respuesta
   //   valor:    respuesta fija (se usa en lugar de "columna")
-  //   exacta:   true = solo marca la opción que corresponde al valor del Excel
-  //             (tolera errores de escritura, ver SIMILITUD_MINIMA); si no existe
-  //             en el formulario, la pregunta se deja en blanco y se envía el resto.
+  //   exacta:   true = pregunta FILTRO: si el valor del Excel no corresponde a
+  //             ninguna opción del formulario (tolerando errores de escritura,
+  //             ver SIMILITUD_MINIMA), esa fila NO se envía y se pasa a la siguiente.
   const REGLAS = [
     { pregunta: /es para/, valor: 'Negociar' },            // Punto 2: siempre "Negociar"
     { pregunta: /codigo/, columna: 'Código' },
@@ -51,6 +51,11 @@
   //   'MINIMERCADOS': 'MINI MERCADO',
   const EQUIVALENCIAS = {
   };
+
+  // En "Validar canales" y en el resumen se avisa de los canales omitidos cuya opción
+  // más parecida supera este valor, por si son el mismo canal y conviene agregar una
+  // equivalencia (así no se salta ninguna fila que sí pertenezca).
+  const AVISO_DUDOSO = 0.6;
 
   // Pausa (milisegundos) entre un envío y el siguiente.
   const PAUSA_ENTRE_ENVIOS = 1500;
@@ -209,14 +214,20 @@
   }
 
   // La opción más parecida (para explicar por qué no se marcó nada).
-  function masCercana(opciones, valor) {
+  function cercana(opciones, valor) {
     const v = limpiar(valor);
     let best = null;
     opciones.forEach((o) => (o.textos || [o.texto]).forEach((t) => {
       const p = similitud(v, limpiar(t));
       if (!best || p > best.p) best = { texto: o.texto.trim(), p };
     }));
-    return best ? `más parecida: "${best.texto}" (${Math.round(best.p * 100)}%)` : 'el formulario no mostró opciones';
+    return best;
+  }
+  function masCercana(opciones, valor) {
+    const best = cercana(opciones, valor);
+    if (!best) return 'el formulario no mostró opciones';
+    return `más parecida: "${best.texto}" (${Math.round(best.p * 100)}%)` +
+      (best.p >= AVISO_DUDOSO ? ' ⚠ REVISA: ¿es el mismo canal? agrégalo en EQUIVALENCIAS' : '');
   }
 
   function mejorOpcion(opciones, valor, exacta) {
@@ -235,6 +246,25 @@
       : `${valor} → "${m.opcion.texto.trim()}" (${m.tipo}${m.tipo === 'interpretada' ? ' ' + Math.round(m.parecido * 100) + '%' : ''})`;
 
   class OpcionNoExiste extends Error {}
+  class FilaOmitida extends Error {}
+
+  // Revisa las preguntas filtro (subcanal) ANTES de llenar nada.
+  // Devuelve null si la fila se puede enviar, o el motivo para omitirla.
+  async function motivoParaOmitir(fila, headers) {
+    const qs = preguntasVisibles();
+    for (const regla of REGLAS.filter((r) => r.exacta && r.columna)) {
+      const col = headers.find((h) => norm(h) === norm(regla.columna));
+      const valor = col ? String(fila[col] || '').trim() : '';
+      if (!valor) return `"${regla.columna}" está vacío en el Excel`;
+      const q = qs.find((x) => respuestaPara(tituloDe(x), fila, headers)?.exacta);
+      if (!q) continue; // la pregunta está en otra página: se revisa al llegar a ella
+      const sel = await leerOpciones(q);
+      if (sel && sel.tipo === 'lista') { cerrarLista(); await sleep(200); }
+      if (!sel || !sel.opciones.length) throw new Error(`no se pudieron leer las opciones de "${tituloDe(q)}"`);
+      if (!buscarOpcion(sel.opciones, valor)) return `canal "${valor}" no está en el formulario (${masCercana(sel.opciones, valor)})`;
+    }
+    return null;
+  }
 
   function cerrarLista() {
     const ev = { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true };
@@ -327,17 +357,13 @@
           detalle.push(`— "${titulo}": (se deja vacía)`);
           continue;
         }
-        if (r.exacta && !String(r.valor).trim()) {
-          detalle.push(`— "${titulo}": (vacío en el Excel, se deja en blanco)`);
-          continue;
-        }
+        if (r.exacta && !String(r.valor).trim()) throw new FilaOmitida(`"${titulo}" está vacío en el Excel`);
         let m;
         try {
           m = await responder(q, r.valor, r.exacta);
         } catch (e) {
           if (r.exacta && e instanceof OpcionNoExiste) {
-            detalle.push(`— "${titulo}": "${r.valor}" no está en el formulario, se deja en blanco (${e.message.split(' — ')[1] || ''})`);
-            continue;
+            throw new FilaOmitida(`canal "${r.valor}" no está en el formulario (${e.message.split(' — ')[1] || ''})`);
           }
           throw new Error(`"${titulo}": ${e.message}`);
         }
@@ -422,12 +448,32 @@
     while (st.corriendo && st.indice < st.filas.length) {
       const n = st.indice + 1;
       const fila = st.filas[st.indice];
-      info(`Enviando fila ${n} de ${st.filas.length}: ${fila[st.headers[1]] || fila[st.headers[0]] || ''}`);
+      const nombre = fila[st.headers[1]] || fila[st.headers[0]] || '';
+      info(`Fila ${n} de ${st.filas.length}: ${nombre}`);
+      const omitir = (motivo) => {
+        st = cargarEstado() || st;
+        st.indice++;
+        st.omitidas = (st.omitidas || []).filter((x) => !x.startsWith(`Fila ${n} (`)).concat(`Fila ${n} (${nombre}): ${motivo}`);
+        guardarEstado(st);
+        log(`⏭ Fila ${n} OMITIDA: ${motivo}`);
+      };
+      try {
+        const motivo = await motivoParaOmitir(fila, st.headers);
+        if (motivo) { omitir(motivo); continue; } // nada se llenó: sigue en la misma página
+      } catch (e) {
+        st = cargarEstado() || st;
+        st.corriendo = false; guardarEstado(st);
+        log(`✖ Fila ${n}: ${e.message}`);
+        info(`Detenido en la fila ${n}.`);
+        refrescarBotones(st);
+        return;
+      }
       try {
         const detalle = await llenarFila(fila, st.headers);
         if (st.soloPrueba) {
           st.corriendo = false; st.soloPrueba = false; guardarEstado(st);
           log(`PRUEBA fila ${n} (NO enviada). Revisa el formulario:\n` + detalle.join('\n'));
+          st.indice = n - 1; guardarEstado(st); $('desde').value = n;
           info('Prueba lista. Si todo está bien, recarga la página y pulsa "Enviar todas".');
           refrescarBotones(st);
           return;
@@ -435,13 +481,16 @@
         await enviarYConfirmar();
         st = cargarEstado() || st;
         st.indice++; st.enviadas = (st.enviadas || 0) + 1;
-        const enBlanco = detalle.filter((d) => d.startsWith('—'));
-        if (enBlanco.length) {
-          st.sinSubcanal = (st.sinSubcanal || []).concat(`Fila ${n}: ` + enBlanco.join('; '));
-        }
         guardarEstado(st);
-        log(`✔ Fila ${n} enviada` + (enBlanco.length ? `\n   ${enBlanco.join('\n   ')}` : ''));
+        log(`✔ Fila ${n} enviada`);
       } catch (e) {
+        if (e instanceof FilaOmitida) {
+          // Pasa solo si la pregunta filtro estaba en otra página: el formulario quedó a medio llenar.
+          omitir(e.message);
+          if (st.indice >= st.filas.length) break;
+          location.href = st.url;
+          return;
+        }
         st = cargarEstado() || st;
         st.corriendo = false; guardarEstado(st);
         log(`✖ Fila ${n}: ${e.message}`);
@@ -459,10 +508,10 @@
     }
     if (st.indice >= st.filas.length) {
       st.corriendo = false; guardarEstado(st);
-      info(`✅ Terminado: ${st.enviadas || 0} respuestas enviadas.`);
-      log('Proceso completo.' + ((st.sinSubcanal || []).length
-        ? `\nFilas enviadas con alguna pregunta en blanco (${st.sinSubcanal.length}):\n` + st.sinSubcanal.join('\n')
-        : ''));
+      const om = st.omitidas || [];
+      info(`✅ Terminado: ${st.enviadas || 0} enviadas, ${om.length} omitidas (canal no está en el formulario).`);
+      $('log').textContent = `Proceso completo: ${st.enviadas || 0} enviadas, ${om.length} omitidas.` +
+        (om.length ? `\n\nFILAS OMITIDAS (${om.length}):\n` + om.join('\n') : '');
       refrescarBotones(st);
     } else {
       info(`En pausa en la fila ${st.indice + 1}.`);
@@ -488,16 +537,20 @@
       const cuenta = {};
       st.filas.forEach((f) => { const v = f[col]; if (v) cuenta[v] = (cuenta[v] || 0) + 1; });
       const grupos = { exacta: [], otra: [], no: [] };
+      let enviar = 0, omitir = 0;
+      const vacias = st.filas.filter((f) => !String(f[col] || '').trim()).length;
       for (const [v, n] of Object.entries(cuenta).sort((a, b) => b[1] - a[1])) {
         const m = buscarOpcion(sel.opciones, v);
-        if (!m) grupos.no.push(`✘ ${v} (${n} filas) → queda en blanco; ${masCercana(sel.opciones, v)}`);
-        else if (m.tipo === 'exacta') grupos.exacta.push(`✔ ${v} (${n})`);
-        else grupos.otra.push(`≈ ${describir(v, m)} (${n} filas)`);
+        if (!m) { omitir += n; grupos.no.push(`✘ ${v} (${n} filas) → NO se envían; ${masCercana(sel.opciones, v)}`); }
+        else if (m.tipo === 'exacta') { enviar += n; grupos.exacta.push(`✔ ${v} (${n})`); }
+        else { enviar += n; grupos.otra.push(`≈ ${describir(v, m)} (${n} filas)`); }
       }
-      salida.push(`Pregunta "${tituloDe(q)}" — ${sel.opciones.length} opciones en el formulario`,
-        `\nINTERPRETADOS (revisa que estén bien):`, ...(grupos.otra.length ? grupos.otra : ['(ninguno)']),
-        `\nNO ESTÁN EN EL FORMULARIO:`, ...(grupos.no.length ? grupos.no : ['(ninguno)']),
-        `\nIGUALES:`, ...(grupos.exacta.length ? grupos.exacta : ['(ninguno)']),
+      salida.push(`RESUMEN: se ENVIARÁN ${enviar} filas y se OMITIRÁN ${omitir + vacias} (de ${st.filas.length}).`,
+        ...(vacias ? [`(${vacias} filas tienen "${col}" vacío y se omiten)`] : []),
+        `Pregunta "${tituloDe(q)}" — ${sel.opciones.length} opciones en el formulario`,
+        `\nINTERPRETADOS POR ERROR DE ESCRITURA (sí se envían; revisa que estén bien):`, ...(grupos.otra.length ? grupos.otra : ['(ninguno)']),
+        `\nNO ESTÁN EN EL FORMULARIO (esas filas se omiten):`, ...(grupos.no.length ? grupos.no : ['(ninguno)']),
+        `\nIGUALES (sí se envían):`, ...(grupos.exacta.length ? grupos.exacta : ['(ninguno)']),
         `\nOPCIONES DEL FORMULARIO (${sel.opciones.length}):`, ...sel.opciones.map((o, i) => `${i + 1}. ${(o.textos || [o.texto]).join('  |  ')}`));
     }
     $('log').textContent = salida.join('\n');
@@ -510,11 +563,13 @@
     if (!base) return;
     const desde = Math.max(1, parseInt($('desde').value, 10) || 1) - 1;
     if (desde >= base.filas.length) { info('La fila inicial es mayor que el total de filas.'); return; }
-    if (!soloPrueba && !confirm(`Se enviarán ${base.filas.length - desde} respuestas (filas ${desde + 1} a ${base.filas.length}). ¿Continuar?`)) return;
+    if (!soloPrueba && !confirm(`Se revisarán ${base.filas.length - desde} filas (de la ${desde + 1} a la ${base.filas.length}). ` +
+      'Solo se enviarán las que tengan un canal que exista en el formulario; las demás se omiten. ¿Continuar?')) return;
     const st = {
       headers: base.headers, filas: base.filas, indice: desde,
-      enviadas: (prev && prev.enviadas) || 0,
-      sinSubcanal: (prev && prev.sinSubcanal) || [],
+      // Si se empieza desde la fila 1 es una corrida nueva: contadores en cero.
+      enviadas: desde > 0 && prev ? prev.enviadas || 0 : 0,
+      omitidas: desde > 0 && prev ? prev.omitidas || [] : [],
       corriendo: true, soloPrueba, url: location.href.split('#')[0],
     };
     guardarEstado(st);
