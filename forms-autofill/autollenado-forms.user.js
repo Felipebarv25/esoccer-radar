@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Autollenado Microsoft Forms desde Excel (ML rutas)
 // @namespace    https://github.com/felipebarv25
-// @version      1.4.1
+// @version      1.4.2
 // @description  Carga un Excel (Código, Nombre del Cliente, Jefatura, Ruta, Descripción Canal, Territorio) y envía una respuesta del formulario por cada fila.
 // @match        https://forms.office.com/*
 // @match        https://forms.cloud.microsoft/*
@@ -50,6 +50,8 @@
   // No importan mayúsculas ni tildes. Ejemplo:
   //   'MINIMERCADOS': 'MINI MERCADO',
   const EQUIVALENCIAS = {
+    'REST COMIDA RAPIDA KA': 'OMIDAS RAPIDAS',
+    'HELADERIAS KA': 'FRUTERIA / HELADERIA',
   };
 
   // En "Validar canales" y en el resumen se avisa de los canales omitidos cuya opción
