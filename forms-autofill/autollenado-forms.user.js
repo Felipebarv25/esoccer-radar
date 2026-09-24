@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Autollenado Microsoft Forms desde Excel (ML rutas)
 // @namespace    https://github.com/felipebarv25
-// @version      1.4.0
+// @version      1.4.1
 // @description  Carga un Excel (Código, Nombre del Cliente, Jefatura, Ruta, Descripción Canal, Territorio) y envía una respuesta del formulario por cada fila.
 // @match        https://forms.office.com/*
 // @match        https://forms.cloud.microsoft/*
@@ -411,7 +411,7 @@
         #af-panel .min{float:right;background:none;border:none;color:#666;margin:0;padding:0 4px}
       </style>
       <button class="min" data-a="min" title="Minimizar">—</button>
-      <h3>Autollenado desde Excel</h3>
+      <h3>Autollenado desde Excel <small style="color:#888;font-weight:normal">v${(typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || ''}</small></h3>
       <div data-a="cuerpo">
         <input type="file" accept=".xlsx,.xls,.xlsm,.csv" data-a="file"><br>
         <div data-a="info" style="margin-top:6px;color:#555">Carga el Excel para empezar.</div>
