@@ -26,9 +26,9 @@
   //   pregunta: texto (o expresión regular) que aparece en el título de la pregunta
   //   columna:  encabezado de la columna del Excel de donde sale la respuesta
   //   valor:    respuesta fija (se usa en lugar de "columna")
-  //   exacta:   true = solo marca la opción que sea igual al valor del Excel
-  //             (sin parecidos); si no existe en el formulario, la pregunta
-  //             se deja en blanco y se envía el resto normalmente.
+  //   exacta:   true = solo marca la opción que corresponde al valor del Excel
+  //             (tolera errores de escritura, ver SIMILITUD_MINIMA); si no existe
+  //             en el formulario, la pregunta se deja en blanco y se envía el resto.
   const REGLAS = [
     { pregunta: /es para/, valor: 'Negociar' },            // Punto 2: siempre "Negociar"
     { pregunta: /codigo/, columna: 'Código' },
