@@ -52,7 +52,7 @@ del formulario (sin llenar ni enviar nada) y muestra: cuáles son iguales, cuál
 
 1. Abre el formulario. Abajo a la derecha aparece el panel **Autollenado desde Excel**.
 2. Elige tu archivo `.xlsx`. El panel muestra cuántas filas encontró.
-3. Pulsa **Validar canales** y revisa la lista de canales interpretados y los que quedarán en blanco.
+3. Pulsa **Validar canales** y revisa cuántas filas se enviarán, los canales interpretados y las filas que se omitirán.
    Luego pulsa **Probar (llenar sin enviar)**: llena el formulario con la primera fila **sin enviarlo**.
    Revisa que cada respuesta quedó en su pregunta (el panel lista qué puso en cada una).
 4. Si todo está bien, recarga la página y pulsa **Enviar todas**. El script envía una fila,
