@@ -12,6 +12,14 @@ Primera hoja, primera fila con estos encabezados (el orden no importa):
 
 La pregunta 2 ("el cliente es para") siempre se responde **Negociar**.
 
+La pregunta **Subcanal** se llena con la columna **Descripción Canal**:
+- Si ese canal existe entre las opciones del formulario, se marca **exactamente ese**
+  (sin buscar parecidos; `DROGUERIA` no se marca como `DROGUERÍA HM`).
+  Si Excel trae el nombre cortado (p. ej. `INSTITUCIONES Y OFICINAS (ENTIDADES PRIV`),
+  se marca la única opción que empieza igual.
+- Si no existe, el subcanal **se deja en blanco** y el resto de la respuesta se envía normal.
+  Al terminar, el panel lista qué filas se enviaron sin subcanal.
+
 ## Instalación (una sola vez, ~3 minutos)
 
 1. Instala la extensión gratuita **Tampermonkey** en Chrome o Edge: <https://www.tampermonkey.net/>.
@@ -30,7 +38,7 @@ La pregunta 2 ("el cliente es para") siempre se responde **Negociar**.
    vuelve a abrir el formulario en blanco y sigue con la siguiente. Deja la pestaña abierta.
 
 - **Pausar** detiene el proceso después del envío en curso; **Enviar todas** lo retoma.
-- Si una fila falla (por ejemplo, un canal que no existe en las opciones del formulario),
+- Si una fila falla (por ejemplo, una pregunta obligatoria que no se pudo llenar),
   el proceso se detiene en esa fila y te dice por qué. Puedes cambiar "Empezar en la fila #"
   para saltarla o continuar.
 - El progreso se guarda: si cierras el navegador, al volver a abrir el formulario sigue en la fila pendiente.

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Autollenado Microsoft Forms desde Excel (ML rutas)
 // @namespace    https://github.com/felipebarv25
-// @version      1.0.0
+// @version      1.1.0
 // @description  Carga un Excel (Código, Nombre del Cliente, Jefatura, Ruta, Descripción Canal, Territorio) y envía una respuesta del formulario por cada fila.
 // @match        https://forms.office.com/*
 // @match        https://forms.cloud.microsoft/*
@@ -26,13 +26,16 @@
   //   pregunta: texto (o expresión regular) que aparece en el título de la pregunta
   //   columna:  encabezado de la columna del Excel de donde sale la respuesta
   //   valor:    respuesta fija (se usa en lugar de "columna")
+  //   exacta:   true = solo marca la opción que sea igual al valor del Excel
+  //             (sin parecidos); si no existe en el formulario, la pregunta
+  //             se deja en blanco y se envía el resto normalmente.
   const REGLAS = [
     { pregunta: /es para/, valor: 'Negociar' },            // Punto 2: siempre "Negociar"
     { pregunta: /codigo/, columna: 'Código' },
     { pregunta: /nombre/, columna: 'Nombre del Cliente' },
     { pregunta: /jefatura/, columna: 'Jefatura' },
     { pregunta: /ruta/, columna: 'Ruta' },
-    { pregunta: /canal/, columna: 'Descripción Canal' },
+    { pregunta: /canal/, columna: 'Descripción Canal', exacta: true }, // Subcanal
     { pregunta: /territorio/, columna: 'Territorio' },
   ];
 
@@ -112,7 +115,7 @@
       if (!hit) continue;
       if ('valor' in r) return { valor: r.valor, origen: 'fijo' };
       const col = headers.find((h) => norm(h) === norm(r.columna));
-      if (col) return { valor: fila[col], origen: col };
+      if (col) return { valor: fila[col], origen: col, exacta: !!r.exacta };
     }
     // Respaldo: el título contiene el nombre de una columna del Excel.
     const col = headers.find((h) => norm(h) && titulo.includes(norm(h)));
@@ -129,9 +132,22 @@
     el.dispatchEvent(new Event('blur', { bubbles: true }));
   }
 
-  function mejorOpcion(opciones, valor) {
+  // Largo con el que Excel suele cortar las descripciones (p. ej. "INSTITUCIONES Y OFICINAS (ENTIDADES PRIV").
+  const LARGO_CORTADO = 30;
+
+  function mejorOpcion(opciones, valor, exacta) {
     // opciones: [{texto, el}]
     const v = norm(valor);
+    if (exacta) {
+      const igual = opciones.find((o) => norm(o.texto) === v);
+      if (igual) return igual;
+      // Único caso permitido: el Excel trae el nombre cortado y solo una opción empieza así.
+      if (v.length >= LARGO_CORTADO) {
+        const empiezan = opciones.filter((o) => norm(o.texto).startsWith(v));
+        if (empiezan.length === 1) return empiezan[0];
+      }
+      return null;
+    }
     return (
       opciones.find((o) => norm(o.texto) === v) ||
       opciones.find((o) => norm(o.texto).startsWith(v) || v.startsWith(norm(o.texto))) ||
@@ -139,7 +155,15 @@
     );
   }
 
-  async function responder(q, valor) {
+  class OpcionNoExiste extends Error {}
+
+  function cerrarLista() {
+    const ev = { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true };
+    (document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keydown', ev));
+    document.body.dispatchEvent(new KeyboardEvent('keydown', ev));
+  }
+
+  async function responder(q, valor, exacta) {
     // 1) Opción única / múltiple
     const choices = [...q.querySelectorAll('input[type="radio"], input[type="checkbox"]')];
     if (choices.length) {
@@ -147,8 +171,8 @@
         const lab = el.closest('label') || el.closest('[data-automation-id="choiceItem"]') || el.parentElement;
         return { texto: el.value || (lab ? lab.textContent : ''), el };
       });
-      const o = mejorOpcion(opciones, valor);
-      if (!o) throw new Error(`no existe la opción "${valor}"`);
+      const o = mejorOpcion(opciones, valor, exacta);
+      if (!o) throw new OpcionNoExiste(`no existe la opción "${valor}"`);
       if (!o.el.checked) o.el.click();
       return;
     }
@@ -161,8 +185,8 @@
         await sleep(100);
         lista = [...document.querySelectorAll('[role="option"]')].filter((el) => el.offsetParent !== null);
       }
-      const o = mejorOpcion(lista.map((el) => ({ texto: el.textContent, el })), valor);
-      if (!o) { document.body.click(); throw new Error(`no existe la opción "${valor}" en la lista`); }
+      const o = mejorOpcion(lista.map((el) => ({ texto: el.textContent, el })), valor, exacta);
+      if (!o) { cerrarLista(); await sleep(200); throw new OpcionNoExiste(`no existe la opción "${valor}" en la lista`); }
       o.el.click();
       await sleep(150);
       return;
@@ -201,7 +225,19 @@
           detalle.push(`— "${titulo}": (se deja vacía)`);
           continue;
         }
-        await responder(q, r.valor).catch((e) => { throw new Error(`"${titulo}": ${e.message}`); });
+        if (r.exacta && !String(r.valor).trim()) {
+          detalle.push(`— "${titulo}": (vacío en el Excel, se deja en blanco)`);
+          continue;
+        }
+        try {
+          await responder(q, r.valor, r.exacta);
+        } catch (e) {
+          if (r.exacta && e instanceof OpcionNoExiste) {
+            detalle.push(`— "${titulo}": "${r.valor}" no está en el formulario, se deja en blanco`);
+            continue;
+          }
+          throw new Error(`"${titulo}": ${e.message}`);
+        }
         detalle.push(`✔ "${titulo}" ← ${r.valor}  [${r.origen}]`);
       }
       const sig = boton('nextButton', /^(siguiente|next)$/);
@@ -294,8 +330,12 @@
         await enviarYConfirmar();
         st = cargarEstado() || st;
         st.indice++; st.enviadas = (st.enviadas || 0) + 1;
+        const enBlanco = detalle.filter((d) => d.startsWith('—'));
+        if (enBlanco.length) {
+          st.sinSubcanal = (st.sinSubcanal || []).concat(`Fila ${n}: ` + enBlanco.join('; '));
+        }
         guardarEstado(st);
-        log(`✔ Fila ${n} enviada`);
+        log(`✔ Fila ${n} enviada` + (enBlanco.length ? `\n   ${enBlanco.join('\n   ')}` : ''));
       } catch (e) {
         st = cargarEstado() || st;
         st.corriendo = false; guardarEstado(st);
@@ -315,7 +355,9 @@
     if (st.indice >= st.filas.length) {
       st.corriendo = false; guardarEstado(st);
       info(`✅ Terminado: ${st.enviadas || 0} respuestas enviadas.`);
-      log('Proceso completo.');
+      log('Proceso completo.' + ((st.sinSubcanal || []).length
+        ? `\nFilas enviadas con alguna pregunta en blanco (${st.sinSubcanal.length}):\n` + st.sinSubcanal.join('\n')
+        : ''));
       refrescarBotones(st);
     } else {
       info(`En pausa en la fila ${st.indice + 1}.`);
@@ -334,6 +376,7 @@
     const st = {
       headers: base.headers, filas: base.filas, indice: desde,
       enviadas: (prev && prev.enviadas) || 0,
+      sinSubcanal: (prev && prev.sinSubcanal) || [],
       corriendo: true, soloPrueba, url: location.href.split('#')[0],
     };
     guardarEstado(st);
