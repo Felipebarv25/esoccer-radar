@@ -20,6 +20,26 @@ La pregunta **Subcanal** se llena con la columna **Descripción Canal**:
 - Si no existe, el subcanal **se deja en blanco** y el resto de la respuesta se envía normal.
   Al terminar, el panel lista qué filas se enviaron sin subcanal.
 
+### Errores de escritura (en el Excel o en el formulario)
+
+El script interpreta errores de escritura comparando letra por letra:
+`COMIDAS RAPIDAS` (Excel) se reconoce como `OMIDAS RAPIDAS` (formulario) porque se parecen un 93 %.
+Solo acepta la opción si se parece al menos un **85 %** (`SIMILITUD_MINIMA`) y si no hay otra opción
+casi igual de parecida. Así, `DROGUERIA` (75 % parecido a `DROGUERÍA HM`) **no** se confunde.
+Tampoco importan mayúsculas, tildes ni signos (`BAR / DISCOTECA` = `BAR/DISCOTECA`).
+
+Para casos especiales, agrega a mano la equivalencia en `EQUIVALENCIAS` al inicio del script:
+
+```js
+const EQUIVALENCIAS = {
+  'MINIMERCADOS': 'MINI MERCADO',   // "lo que dice el Excel": "lo que dice el formulario"
+};
+```
+
+**Botón "Validar canales":** antes de enviar, compara todos los canales del Excel con las opciones
+del formulario (sin llenar ni enviar nada) y muestra: cuáles son iguales, cuáles se **interpretaron**
+(con el % de parecido, para que confirmes) y cuáles **no están** y quedarán en blanco.
+
 ## Instalación (una sola vez, ~3 minutos)
 
 1. Instala la extensión gratuita **Tampermonkey** en Chrome o Edge: <https://www.tampermonkey.net/>.
@@ -32,7 +52,8 @@ La pregunta **Subcanal** se llena con la columna **Descripción Canal**:
 
 1. Abre el formulario. Abajo a la derecha aparece el panel **Autollenado desde Excel**.
 2. Elige tu archivo `.xlsx`. El panel muestra cuántas filas encontró.
-3. Pulsa **Probar (llenar sin enviar)**: llena el formulario con la primera fila **sin enviarlo**.
+3. Pulsa **Validar canales** y revisa la lista de canales interpretados y los que quedarán en blanco.
+   Luego pulsa **Probar (llenar sin enviar)**: llena el formulario con la primera fila **sin enviarlo**.
    Revisa que cada respuesta quedó en su pregunta (el panel lista qué puso en cada una).
 4. Si todo está bien, recarga la página y pulsa **Enviar todas**. El script envía una fila,
    vuelve a abrir el formulario en blanco y sigue con la siguiente. Deja la pestaña abierta.

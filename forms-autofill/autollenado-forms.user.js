@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Autollenado Microsoft Forms desde Excel (ML rutas)
 // @namespace    https://github.com/felipebarv25
-// @version      1.1.0
+// @version      1.2.0
 // @description  Carga un Excel (Código, Nombre del Cliente, Jefatura, Ruta, Descripción Canal, Territorio) y envía una respuesta del formulario por cada fila.
 // @match        https://forms.office.com/*
 // @match        https://forms.cloud.microsoft/*
@@ -38,6 +38,19 @@
     { pregunta: /canal/, columna: 'Descripción Canal', exacta: true }, // Subcanal
     { pregunta: /territorio/, columna: 'Territorio' },
   ];
+
+  // Qué tan parecido debe ser un texto para aceptar un error de escritura
+  // (0 a 1). 0.85 = se tolera más o menos 1 letra mala por cada 7.
+  //   "COMIDAS RAPIDAS" vs "OMIDAS RAPIDAS" → 0.93 ✔ (se interpreta)
+  //   "DROGUERIA"       vs "DROGUERIA HM"   → 0.75 ✘ (es otro canal)
+  const SIMILITUD_MINIMA = 0.85;
+
+  // Equivalencias manuales: "lo que dice el Excel": "lo que dice el formulario".
+  // Úsalas para casos que la interpretación automática no resuelve sola.
+  // No importan mayúsculas ni tildes. Ejemplo:
+  //   'MINIMERCADOS': 'MINI MERCADO',
+  const EQUIVALENCIAS = {
+  };
 
   // Pausa (milisegundos) entre un envío y el siguiente.
   const PAUSA_ENTRE_ENVIOS = 1500;
@@ -135,25 +148,71 @@
   // Largo con el que Excel suele cortar las descripciones (p. ej. "INSTITUCIONES Y OFICINAS (ENTIDADES PRIV").
   const LARGO_CORTADO = 30;
 
-  function mejorOpcion(opciones, valor, exacta) {
-    // opciones: [{texto, el}]
-    const v = norm(valor);
-    if (exacta) {
-      const igual = opciones.find((o) => norm(o.texto) === v);
-      if (igual) return igual;
-      // Único caso permitido: el Excel trae el nombre cortado y solo una opción empieza así.
-      if (v.length >= LARGO_CORTADO) {
-        const empiezan = opciones.filter((o) => norm(o.texto).startsWith(v));
-        if (empiezan.length === 1) return empiezan[0];
+  // Texto comparable: sin tildes, sin mayúsculas, sin signos ("BAR / DISCOTECA" = "bar discoteca").
+  const limpiar = (s) => norm(s).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  // Distancia de edición (Levenshtein): letras a cambiar, quitar o agregar para igualar a y b.
+  function distancia(a, b) {
+    let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+    for (let i = 1; i <= a.length; i++) {
+      const cur = [i];
+      for (let j = 1; j <= b.length; j++) {
+        cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
       }
-      return null;
+      prev = cur;
     }
-    return (
-      opciones.find((o) => norm(o.texto) === v) ||
-      opciones.find((o) => norm(o.texto).startsWith(v) || v.startsWith(norm(o.texto))) ||
-      opciones.find((o) => norm(o.texto).includes(v) || v.includes(norm(o.texto)))
-    );
+    return prev[b.length];
   }
+  const similitud = (a, b) => 1 - distancia(a, b) / Math.max(a.length, b.length, 1);
+
+  const EQUIV = Object.fromEntries(Object.entries(EQUIVALENCIAS).map(([k, v]) => [limpiar(k), v]));
+
+  // Busca la opción del formulario que corresponde al valor del Excel.
+  // Devuelve {opcion, tipo, parecido} o null. tipo: exacta | equivalencia | cortada | interpretada
+  function buscarOpcion(opciones, valor) {
+    let v = limpiar(valor);
+    let tipo = 'exacta';
+    if (EQUIV[v]) { v = limpiar(EQUIV[v]); tipo = 'equivalencia'; }
+    const ops = opciones.map((o) => ({ o, t: limpiar(o.texto) })).filter((x) => x.t);
+
+    const igual = ops.find((x) => x.t === v);
+    if (igual) return { opcion: igual.o, tipo, parecido: 1 };
+
+    // Nombre cortado por Excel: solo una opción empieza igual.
+    if (v.length >= LARGO_CORTADO) {
+      const empiezan = ops.filter((x) => x.t.startsWith(v));
+      if (empiezan.length === 1) return { opcion: empiezan[0].o, tipo: 'cortada', parecido: 1 };
+    }
+
+    // Error de escritura (en el Excel o en el formulario).
+    const puntajes = ops
+      .map((x) => {
+        let p = similitud(v, x.t);
+        if (v.length >= LARGO_CORTADO && x.t.length > v.length) p = Math.max(p, similitud(v, x.t.slice(0, v.length)));
+        return { ...x, p };
+      })
+      .sort((a, b) => b.p - a.p);
+    const [mejor, segundo] = puntajes;
+    if (mejor && mejor.p >= SIMILITUD_MINIMA && (!segundo || mejor.p - segundo.p >= 0.05)) {
+      return { opcion: mejor.o, tipo: tipo === 'equivalencia' ? 'equivalencia' : 'interpretada', parecido: mejor.p };
+    }
+    return null;
+  }
+
+  function mejorOpcion(opciones, valor, exacta) {
+    const r = buscarOpcion(opciones, valor);
+    if (r || exacta) return r;
+    // Preguntas que no son el subcanal: se permite además que un texto contenga al otro.
+    const v = norm(valor);
+    const o =
+      opciones.find((o) => norm(o.texto).startsWith(v) || v.startsWith(norm(o.texto))) ||
+      opciones.find((o) => norm(o.texto).includes(v) || v.includes(norm(o.texto)));
+    return o ? { opcion: o, tipo: 'aproximada', parecido: 0 } : null;
+  }
+
+  const describir = (valor, m) =>
+    m.tipo === 'exacta' ? valor
+      : `${valor} → "${m.opcion.texto.trim()}" (${m.tipo}${m.tipo === 'interpretada' ? ' ' + Math.round(m.parecido * 100) + '%' : ''})`;
 
   class OpcionNoExiste extends Error {}
 
@@ -163,37 +222,57 @@
     document.body.dispatchEvent(new KeyboardEvent('keydown', ev));
   }
 
-  async function responder(q, valor, exacta) {
-    // 1) Opción única / múltiple
+  // Lee las opciones de una pregunta de selección. En listas desplegables la deja abierta.
+  async function leerOpciones(q) {
     const choices = [...q.querySelectorAll('input[type="radio"], input[type="checkbox"]')];
     if (choices.length) {
-      const opciones = choices.map((el) => {
-        const lab = el.closest('label') || el.closest('[data-automation-id="choiceItem"]') || el.parentElement;
-        return { texto: el.value || (lab ? lab.textContent : ''), el };
-      });
-      const o = mejorOpcion(opciones, valor, exacta);
-      if (!o) throw new OpcionNoExiste(`no existe la opción "${valor}"`);
-      if (!o.el.checked) o.el.click();
-      return;
+      return {
+        tipo: 'opciones',
+        opciones: choices.map((el) => {
+          const lab = el.closest('label') || el.closest('[data-automation-id="choiceItem"]') || el.parentElement;
+          return { texto: el.value || (lab ? lab.textContent : ''), el };
+        }),
+      };
     }
-    // 2) Lista desplegable
     const dd = q.querySelector('[aria-haspopup="listbox"], [role="combobox"]');
     if (dd) {
+      const antes = new Set(document.querySelectorAll('[role="listbox"]'));
       dd.click();
+      // Solo las opciones de ESTA lista: la que indica aria-controls, o la que se acaba de abrir.
+      const listaPropia = () => {
+        const id = dd.getAttribute('aria-controls') || dd.getAttribute('aria-owns');
+        const porId = id && document.getElementById(id);
+        if (porId && porId.offsetParent !== null) return porId;
+        const nuevas = [...document.querySelectorAll('[role="listbox"]')].filter((l) => !antes.has(l) && l.offsetParent !== null);
+        if (nuevas.length) return nuevas[nuevas.length - 1];
+        return q.querySelector('[role="listbox"]');
+      };
       let lista = [];
       for (let i = 0; i < 30 && !lista.length; i++) {
         await sleep(100);
-        lista = [...document.querySelectorAll('[role="option"]')].filter((el) => el.offsetParent !== null);
+        const lb = listaPropia();
+        lista = lb ? [...lb.querySelectorAll('[role="option"]')].filter((el) => el.offsetParent !== null) : [];
       }
-      const o = mejorOpcion(lista.map((el) => ({ texto: el.textContent, el })), valor, exacta);
-      if (!o) { cerrarLista(); await sleep(200); throw new OpcionNoExiste(`no existe la opción "${valor}" en la lista`); }
-      o.el.click();
-      await sleep(150);
-      return;
+      return { tipo: 'lista', opciones: lista.map((el) => ({ texto: el.textContent, el })) };
     }
-    // 3) Texto
+    return null;
+  }
+
+  // Responde una pregunta. Devuelve la opción elegida (o null si es de texto).
+  async function responder(q, valor, exacta) {
+    const sel = await leerOpciones(q);
+    if (sel) {
+      const m = mejorOpcion(sel.opciones, valor, exacta);
+      if (!m) {
+        if (sel.tipo === 'lista') { cerrarLista(); await sleep(200); }
+        throw new OpcionNoExiste(`no existe la opción "${valor}"`);
+      }
+      if (!(m.opcion.el.checked)) m.opcion.el.click();
+      await sleep(150);
+      return m;
+    }
     const txt = q.querySelector('input[type="text"], input:not([type]), input[type="number"], textarea, input[data-automation-id="textInput"]');
-    if (txt) { escribirTexto(txt, valor); return; }
+    if (txt) { escribirTexto(txt, valor); return null; }
     throw new Error('tipo de pregunta no reconocido');
   }
 
@@ -229,8 +308,9 @@
           detalle.push(`— "${titulo}": (vacío en el Excel, se deja en blanco)`);
           continue;
         }
+        let m;
         try {
-          await responder(q, r.valor, r.exacta);
+          m = await responder(q, r.valor, r.exacta);
         } catch (e) {
           if (r.exacta && e instanceof OpcionNoExiste) {
             detalle.push(`— "${titulo}": "${r.valor}" no está en el formulario, se deja en blanco`);
@@ -238,7 +318,7 @@
           }
           throw new Error(`"${titulo}": ${e.message}`);
         }
-        detalle.push(`✔ "${titulo}" ← ${r.valor}  [${r.origen}]`);
+        detalle.push(`✔ "${titulo}" ← ${m ? describir(r.valor, m) : r.valor}  [${r.origen}]`);
       }
       const sig = boton('nextButton', /^(siguiente|next)$/);
       if (!sig) break;
@@ -290,6 +370,7 @@
         <button data-a="probar" class="sec" disabled>Probar (llenar sin enviar)</button>
         <button data-a="iniciar" disabled>Enviar todas</button>
         <button data-a="pausar" class="sec" disabled>Pausar</button>
+        <button data-a="validar" class="sec" disabled>Validar canales</button>
         <button data-a="reset" class="sec">Reiniciar</button>
         <pre data-a="log"></pre>
       </div>`;
@@ -308,6 +389,7 @@
     $('probar').disabled = !hay || (st && st.corriendo);
     $('iniciar').disabled = !hay || (st && st.corriendo);
     $('pausar').disabled = !(st && st.corriendo);
+    $('validar').disabled = !hay || (st && st.corriendo);
   }
 
   async function correr() {
@@ -364,6 +446,38 @@
       $('desde').value = st.indice + 1;
       refrescarBotones(st);
     }
+  }
+
+  // Compara cada canal distinto del Excel con las opciones del formulario, sin llenar nada.
+  async function validarCanales() {
+    const st = cargarEstado();
+    if (!st || !st.filas) return;
+    const reglas = REGLAS.filter((r) => r.exacta && r.columna);
+    const qs = preguntasVisibles();
+    const salida = [];
+    for (const regla of reglas) {
+      const q = qs.find((x) => (regla.pregunta instanceof RegExp ? regla.pregunta.test(tituloDe(x)) : tituloDe(x).includes(norm(regla.pregunta))));
+      const col = st.headers.find((h) => norm(h) === norm(regla.columna));
+      if (!q || !col) { salida.push(`No se encontró la pregunta o la columna "${regla.columna}".`); continue; }
+      const sel = await leerOpciones(q);
+      if (sel && sel.tipo === 'lista') { cerrarLista(); await sleep(200); }
+      if (!sel || !sel.opciones.length) { salida.push(`"${tituloDe(q)}" no tiene opciones legibles.`); continue; }
+      const cuenta = {};
+      st.filas.forEach((f) => { const v = f[col]; if (v) cuenta[v] = (cuenta[v] || 0) + 1; });
+      const grupos = { exacta: [], otra: [], no: [] };
+      for (const [v, n] of Object.entries(cuenta).sort((a, b) => b[1] - a[1])) {
+        const m = buscarOpcion(sel.opciones, v);
+        if (!m) grupos.no.push(`✘ ${v} (${n} filas) → queda en blanco`);
+        else if (m.tipo === 'exacta') grupos.exacta.push(`✔ ${v} (${n})`);
+        else grupos.otra.push(`≈ ${describir(v, m)} (${n} filas)`);
+      }
+      salida.push(`Pregunta "${tituloDe(q)}" — ${sel.opciones.length} opciones en el formulario`,
+        `\nINTERPRETADOS (revisa que estén bien):`, ...(grupos.otra.length ? grupos.otra : ['(ninguno)']),
+        `\nNO ESTÁN EN EL FORMULARIO:`, ...(grupos.no.length ? grupos.no : ['(ninguno)']),
+        `\nIGUALES:`, ...grupos.exacta);
+    }
+    $('log').textContent = salida.join('\n');
+    info('Validación lista (no se llenó ni envió nada). Revisa el recuadro de abajo.');
   }
 
   function arrancar(soloPrueba) {
@@ -424,6 +538,7 @@
       info('Pausando… (se detiene después del envío en curso)');
       refrescarBotones(s);
     };
+    $('validar').onclick = () => (tocado = true) && validarCanales().catch((e) => info('Error al validar: ' + e.message));
     $('reset').onclick = () => {
       if (!confirm('¿Borrar el Excel cargado y el progreso?')) return;
       const s = cargarEstado();
