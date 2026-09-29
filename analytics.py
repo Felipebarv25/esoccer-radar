@@ -87,7 +87,7 @@ def in_window(views, start_col, end_col):
 def scoreboard(views) -> dict:
     """Conteo de una tanda de partidos + dos tasas (estricta y entre decididos)."""
     b = {"analizados": 0, "acierto": 0, "fallo": 0, "empate": 0,
-         "parejo": 0, "sin_datos": 0, "pendiente": 0}
+         "parejo": 0, "sin_datos": 0, "pendiente": 0, "parejo_empate": 0}
     for v in views:
         b["analizados"] += 1
         if not v["closed"]:
@@ -96,14 +96,17 @@ def scoreboard(views) -> dict:
         o = v["outcome"]
         if o in b:
             b[o] += 1
-    decididos = b["acierto"] + b["fallo"]              # con ganador
-    conpick = b["acierto"] + b["fallo"] + b["empate"]  # había favorito (empate cuenta)
+        if o == "parejo" and v.get("winner") is None:  # 50-50 y empató → acierto
+            b["parejo_empate"] += 1
+    # ACIERTO = favorito ganó  O  'parejo' que terminó en empate
+    acierto = b["acierto"] + b["parejo_empate"]
+    decididos = acierto + b["fallo"]
+    conpick = acierto + b["fallo"] + b["empate"]
     b["decididos"] = decididos
     b["conpick"] = conpick
-    # tasa estricta: el favorito GANÓ (empate NO es acierto) — como apuesta a ganar
-    b["tasa_estricta"] = round(100 * b["acierto"] / conpick) if conpick else None
-    # tasa entre decididos: solo partidos que tuvieron ganador
-    b["tasa_decididos"] = round(100 * b["acierto"] / decididos) if decididos else None
+    b["acierto_total"] = acierto
+    b["tasa_estricta"] = round(100 * acierto / conpick) if conpick else None
+    b["tasa_decididos"] = round(100 * acierto / decididos) if decididos else None
     return b
 
 

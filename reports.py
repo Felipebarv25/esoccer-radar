@@ -34,8 +34,13 @@ def _closed_records():
 
 
 def hit_stats(since_utc: datetime) -> dict:
-    """Tasa de acierto sobre partidos cerrados desde `since_utc`."""
-    aciertos = fallos = empates = parejos = 0
+    """Tasa de acierto sobre partidos cerrados desde `since_utc`.
+
+    ACIERTO = el favorito ganó  O  dijimos 'parejo' (50-50) y el partido EMPATÓ
+    (predecir 50-50 y que empate = se cumplió lo que supusimos). El 'parejo' que
+    se definió a un lado se excluye (no elegimos lado).
+    """
+    aciertos_fav = fallos = empates = parejo_empate = parejo_dec = 0
     for rec, res in _closed_records():
         try:
             closed = datetime.fromisoformat(res["closed_at"])
@@ -44,35 +49,42 @@ def hit_stats(since_utc: datetime) -> dict:
         if closed < since_utc:
             continue
         h = res.get("hit")
+        oc = res.get("outcome")
         if h is True:
-            aciertos += 1
+            aciertos_fav += 1
         elif h is False:
             fallos += 1
-        elif res.get("outcome") == "empate":
+        elif oc == "empate":
             empates += 1
-        elif res.get("outcome") == "parejo":
-            parejos += 1
-    decididos = aciertos + fallos
-    rate = round(100 * aciertos / decididos) if decididos else None
-    return {"aciertos": aciertos, "fallos": fallos, "empates": empates,
-            "parejos": parejos, "decididos": decididos, "rate": rate}
+        elif oc == "parejo":
+            if res.get("winner") is None:     # 50-50 y empató → acierto
+                parejo_empate += 1
+            else:                             # 50-50 pero alguien ganó → se excluye
+                parejo_dec += 1
+    aciertos = aciertos_fav + parejo_empate
+    conpick = aciertos + fallos + empates
+    rate = round(100 * aciertos / conpick) if conpick else None
+    return {"aciertos": aciertos, "aciertos_fav": aciertos_fav,
+            "parejo_empate": parejo_empate, "parejo_dec": parejo_dec,
+            "fallos": fallos, "empates": empates,
+            "conpick": conpick, "decididos": aciertos_fav + fallos, "rate": rate,
+            "parejos": parejo_empate + parejo_dec}
 
 
 def _format(label: str, st: dict) -> str:
-    # Denominador HONESTO: TODOS los partidos con favorito que cerraron.
-    # El empate cuenta como NO-acierto (el favorito no ganó).
-    conpick = st["aciertos"] + st["fallos"] + st["empates"]
+    conpick = st["conpick"]
     if conpick == 0:
         cuerpo = "Sin partidos cerrados aún en este periodo."
     else:
-        rate = round(100 * st["aciertos"] / conpick)
+        extra = (f" · incluye {st['parejo_empate']} parejo(s) que empató"
+                 if st.get("parejo_empate") else "")
         cuerpo = (f"✅ {st['aciertos']} aciertos · ❌ {st['fallos']} fallos · "
-                  f"➖ {st['empates']} empates\n"
-                  f"🎯 <b>Tasa de acierto: {rate}%</b> "
-                  f"(aciertos sobre {conpick} partidos; el empate NO es acierto)")
+                  f"➖ {st['empates']} empates{extra}\n"
+                  f"🎯 <b>Tasa de acierto: {st['rate']}%</b> "
+                  f"(sobre {conpick} partidos)")
     return (f"📊 <b>Reporte {label}</b>\n{cuerpo}\n"
-            f"<i>Mide que el favorito GANE, NO rentabilidad ni probabilidad. "
-            f"Con pocos datos no es concluyente.</i>")
+            f"<i>Acierto = el favorito gana, o 'parejo' que termina en empate. "
+            f"NO es rentabilidad ni probabilidad. Con pocos datos no es concluyente.</i>")
 
 
 def _load_state() -> dict:
@@ -176,14 +188,14 @@ def _fmt_scoreboard(sb: dict) -> str:
     if sb["analizados"] == 0:
         return "Sin partidos analizados en esta franja."
     linea1 = (f"Partidos analizados: <b>{sb['analizados']}</b>\n"
-              f"✅ {sb['acierto']} aciertos · ❌ {sb['fallo']} fallos · "
+              f"✅ {sb['acierto_total']} aciertos · ❌ {sb['fallo']} fallos · "
               f"➖ {sb['empate']} empates · ⚪ {sb['parejo']} parejos")
     if sb["pendiente"]:
         linea1 += f" · ⏳ {sb['pendiente']} sin cerrar"
     partes = [linea1]
     if sb["conpick"]:
         partes.append(f"🎯 <b>Tasa estricta: {sb['tasa_estricta']}%</b> "
-                      f"(favorito ganó; empate = no-acierto, sobre {sb['conpick']})")
+                      f"(favorito gana o 'parejo' que empata; sobre {sb['conpick']})")
     if sb["decididos"]:
         partes.append(f"   Tasa entre decididos: {sb['tasa_decididos']}% "
                       f"(sobre {sb['decididos']} con ganador)")
