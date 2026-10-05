@@ -24,9 +24,10 @@ _DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domin
 # outcomes que representan un partido cerrado CON pick decidible (favorito sí/no ganó)
 _CONPICK = ("acierto", "fallo", "empate")
 
-# Caché en memoria de load_views: leer miles de JSON en cada comando era lento.
+# Caché INCREMENTAL de load_views: con 20k+ archivos, releer todo cada vez pegaba
+# la CPU. Cacheamos cada archivo por su mtime y solo reparseamos los nuevos/cambiados.
 _VIEWS_CACHE = {"t": 0.0, "data": None}
-_VIEWS_TTL = 30  # segundos (los reportes toleran ~30s de retraso; los comandos van al instante)
+_FILE_CACHE = {}   # path -> (mtime, view|None)
 
 
 def _parse(iso):
@@ -36,39 +37,52 @@ def _parse(iso):
         return None
 
 
+def _build_view(rec):
+    res = rec.get("result") or {}
+    start = _parse(rec.get("date"))
+    feat = rec.get("features") or {}
+    return {
+        "match_id": rec.get("match_id"),
+        "start_col": start.astimezone(_COL) if start else None,
+        "type": rec.get("match_type"),
+        "p1": rec.get("player1"), "t1": rec.get("team1"),
+        "p2": rec.get("player2"), "t2": rec.get("team2"),
+        "favored": rec.get("favored"),
+        "score_a": rec.get("score_a"),
+        "elo_exp_a": feat.get("elo_exp_a"),
+        "outcome": res.get("outcome"),
+        "hit": res.get("hit"),
+        "winner": res.get("winner"),
+        "sa": res.get("sa"), "sb": res.get("sb"),
+        "closed": bool(res),
+    }
+
+
 def load_views(force=False):
     """Vista uniforme de los registros. Los comandos SIEMPRE usan la copia en
-    memoria (instantáneo); la lectura pesada de archivos solo ocurre cuando un
-    hilo de fondo llama force=True (o en el primer arranque)."""
+    memoria (instantáneo); la relectura de disco (incremental) solo ocurre cuando
+    un hilo de fondo llama force=True (o en el primer arranque)."""
     if not force and _VIEWS_CACHE["data"] is not None:
-        return _VIEWS_CACHE["data"]   # nunca leemos disco en el camino del comando
-    now = time.time()
-    views = []
-    for p in glob.glob(os.path.join(_DIR, "*.json")):
+        return _VIEWS_CACHE["data"]
+    paths = set(glob.glob(os.path.join(_DIR, "*.json")))
+    for p in list(_FILE_CACHE):      # soltar los borrados
+        if p not in paths:
+            del _FILE_CACHE[p]
+    for p in paths:                  # solo parsear nuevos o modificados (cerrados)
+        try:
+            mt = os.path.getmtime(p)
+        except OSError:
+            continue
+        hit = _FILE_CACHE.get(p)
+        if hit and hit[0] == mt:
+            continue
         try:
             with open(p, "r", encoding="utf-8") as fh:
-                rec = json.load(fh)
+                _FILE_CACHE[p] = (mt, _build_view(json.load(fh)))
         except (json.JSONDecodeError, OSError):
-            continue
-        res = rec.get("result") or {}
-        start = _parse(rec.get("date"))
-        feat = rec.get("features") or {}
-        views.append({
-            "match_id": rec.get("match_id"),
-            "start_col": start.astimezone(_COL) if start else None,
-            "type": rec.get("match_type"),
-            "p1": rec.get("player1"), "t1": rec.get("team1"),
-            "p2": rec.get("player2"), "t2": rec.get("team2"),
-            "favored": rec.get("favored"),
-            "score_a": rec.get("score_a"),
-            "elo_exp_a": feat.get("elo_exp_a"),   # prob. Elo de que gane p1 (si existe)
-            "outcome": res.get("outcome"),
-            "hit": res.get("hit"),
-            "winner": res.get("winner"),
-            "sa": res.get("sa"), "sb": res.get("sb"),
-            "closed": bool(res),
-        })
-    _VIEWS_CACHE["t"] = now
+            _FILE_CACHE[p] = (mt, None)
+    views = [v for _, v in _FILE_CACHE.values() if v is not None]
+    _VIEWS_CACHE["t"] = time.time()
     _VIEWS_CACHE["data"] = views
     return views
 
