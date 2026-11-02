@@ -52,7 +52,11 @@ def _diffs(f):
 def load_dataset():
     rows, ys, dates, elo_base = [], [], [], []
     cols = _FEATS + ["elo_diff", "career_wr_diff", "form_wr_diff", "team_wr_diff", "h2h_diff"]
-    for p in glob.glob(os.path.join(_DIR, "*.json")):
+    files = glob.glob(os.path.join(_DIR, "*.json"))
+    print(f"Leyendo {len(files)} archivos de data/matches...", file=sys.stderr, flush=True)
+    for i, p in enumerate(files, 1):
+        if i % 2000 == 0:
+            print(f"  ...{i}/{len(files)}", file=sys.stderr, flush=True)
         try:
             with open(p, "r", encoding="utf-8") as fh:
                 rec = json.load(fh)

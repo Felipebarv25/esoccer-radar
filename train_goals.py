@@ -59,7 +59,11 @@ def load_dataset():
     rows, dates = [], []
     totals, over25, over35, over45, btts = [], [], [], [], []
     exp_tot, h2h_avg = [], []
-    for p in glob.glob(os.path.join(_DIR, "*.json")):
+    files = glob.glob(os.path.join(_DIR, "*.json"))
+    print(f"Leyendo {len(files)} archivos de data/matches...", file=sys.stderr, flush=True)
+    for i, p in enumerate(files, 1):
+        if i % 2000 == 0:
+            print(f"  ...{i}/{len(files)}", file=sys.stderr, flush=True)
         try:
             with open(p, "r", encoding="utf-8") as fh:
                 rec = json.load(fh)
