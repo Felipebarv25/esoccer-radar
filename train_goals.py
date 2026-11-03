@@ -1,4 +1,4 @@
-"""Entrena y VALIDA modelos ML de GOLES para eSoccer (#8), honesto y RÁPIDO.
+"""Entrena y VALIDA modelos ML de GOLES para eSoccer (#8), honesto, RÁPIDO y LIVIANO.
 
 Hermano de train_model.py (que modela el RESULTADO). Aquí atacamos lo que el
 usuario pidió: cantidad de goles. Lo honesto primero:
@@ -13,14 +13,9 @@ usuario pidió: cantidad de goles. Lo honesto primero:
 Como el promedio ronda 6 goles, los umbrales útiles están CERCA del promedio
 (5.5, 6.5, 7.5). El Over 2.5 es casi siempre sí (no hay mercado).
 
-Usa modelos RÁPIDOS (logística + gradient boosting por histograma), sin Random
-Forest, para que corra en segundos en la VM. La pregunta de negocio se responde
-igual: ¿un modelo predice MEJOR que la tasa base / que la heurística de goles?
-
-- Split TEMPORAL (entrena viejo, prueba reciente) → sin leakage.
-- Clasificación: Brier/logloss/AUC + CALIBRACIÓN por banda vs tasa base.
-- Regresión: MAE vs (media constante | goles esperados | h2h | modelo).
-- Correlaciones: qué variable se asocia de verdad con el total de goles.
+Memoria: la VM tiene poca RAM, así que leemos en streaming y guardamos arrays
+float32 compactos (no listas de dicts). Modelos rápidos (logística + gradient
+boosting), sin Random Forest.
 
 Uso en el server:
     source .venv/bin/activate
@@ -57,7 +52,9 @@ def _eng(f):
 
 
 def load_dataset(records):
-    rows, dates, totals, btts, exp_tot, h2h_avg = [], [], [], [], [], []
+    """Consume el generador y devuelve arrays numéricos compactos (bajo en RAM)."""
+    import numpy as np
+    rows, dates, totals, btts = [], [], [], []
     for rec in records:
         feat = rec.get("features") or {}
         res = rec.get("result") or {}
@@ -67,20 +64,20 @@ def load_dataset(records):
         if sa is None or sb is None:   # solo partidos cerrados CON marcador
             continue
         f = dict(feat); f.update(_eng(feat))
-        rows.append([f.get(c) for c in _FEATS])
+        rows.append([(f.get(c) if f.get(c) is not None else np.nan) for c in _FEATS])
         totals.append(sa + sb)
         btts.append(1 if (sa > 0 and sb > 0) else 0)
-        exp_tot.append(f.get("exp_total"))
-        h2h_avg.append(f.get("h2h_avg_goals"))
         dates.append(rec.get("date") or "")
-    return _FEATS, rows, dates, totals, btts, exp_tot, h2h_avg
+    X = np.asarray(rows, dtype=np.float32)
+    return (_FEATS, X, dates, np.asarray(totals, dtype=np.float32),
+            np.asarray(btts, dtype=np.int8))
 
 
 def _clf_report(name, y_true, p):
     import numpy as np
     from sklearn.metrics import brier_score_loss, roc_auc_score, accuracy_score
-    p = np.clip(np.array(p, dtype=float), 1e-6, 1 - 1e-6)
-    y = np.array(y_true)
+    p = np.clip(np.asarray(p, dtype=float), 1e-6, 1 - 1e-6)
+    y = np.asarray(y_true)
     try:
         auc = roc_auc_score(y, p)
     except ValueError:
@@ -93,7 +90,7 @@ def _clf_report(name, y_true, p):
 def _calib(y_true, p):
     """Calibración por banda: ¿la prob. del modelo coincide con el real?"""
     import numpy as np
-    p = np.array(p, dtype=float); y = np.array(y_true)
+    p = np.asarray(p, dtype=float); y = np.asarray(y_true)
     print("      calibración (prob→real):", end=" ")
     for lo in (0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9):
         hi = lo + 0.1
@@ -105,13 +102,12 @@ def _calib(y_true, p):
 
 
 def _run_clf(label, model_fn, Xtr, Xte, ytr, yte):
-    import numpy as np
-    base = sum(ytr) / len(ytr)          # tasa base en TRAIN
-    if base in (0.0, 1.0):
+    base = float(sum(ytr)) / len(ytr)          # tasa base en TRAIN
+    if base <= 0.0 or base >= 1.0:
         print(f"\n  === {label} ===  (tasa base {round(100*base)}% — sin mercado, se omite)")
         return
     print(f"\n  === {label} ===  (tasa base train {round(100*base)}% · "
-          f"real test {round(100*sum(yte)/len(yte))}%)")
+          f"real test {round(100*float(sum(yte))/len(yte))}%)")
     _clf_report("BASELINE tasa base", yte, [base] * len(yte))
     model = model_fn()
     model.fit(Xtr, ytr)
@@ -122,9 +118,9 @@ def _run_clf(label, model_fn, Xtr, Xte, ytr, yte):
 
 def _reg_report(name, y_true, pred):
     import numpy as np
-    y = np.array(y_true, dtype=float); p = np.array(pred, dtype=float)
-    mae = np.mean(np.abs(y - p))
-    rmse = np.sqrt(np.mean((y - p) ** 2))
+    y = np.asarray(y_true, dtype=float); p = np.asarray(pred, dtype=float)
+    mae = float(np.mean(np.abs(y - p)))
+    rmse = float(np.sqrt(np.mean((y - p) ** 2)))
     print(f"    [{name}]  MAE {mae:.3f} · RMSE {rmse:.3f}")
     return mae
 
@@ -142,21 +138,17 @@ def main():
         raise SystemExit(1)
 
     rebuild = "--rebuild" in sys.argv
-    records = dataset_cache.load_records(rebuild=rebuild)
-    cols, rows, dates, totals, btts, exp_tot, h2h_avg = load_dataset(records)
-    n = len(rows)
+    cols, X, dates, totals, btts = load_dataset(dataset_cache.iter_records(rebuild))
+    n = X.shape[0]
     print(f"Dataset: {n} partidos cerrados con marcador + features.")
     if n < 500:
         print("Muy pocos datos todavía (necesitamos ~1000+). Deja acumular y reintenta.")
         return
 
-    order = sorted(range(n), key=lambda i: dates[i])
-    def srt(a): return [a[i] for i in order]
-    rows = srt(rows); totals = srt(totals); btts = srt(btts)
-    exp_tot = srt(exp_tot); h2h_avg = srt(h2h_avg)
-
+    order = np.argsort(np.asarray(dates))
+    X = X[order]; totals = totals[order]; btts = btts[order]
     cut = int(n * 0.8)
-    Xtr, Xte = rows[:cut], rows[cut:]
+    Xtr, Xte = X[:cut], X[cut:]
     print(f"Train {len(Xtr)} · Test {len(Xte)} (split temporal 80/20)")
     print(f"Promedio de goles por partido (test): {np.mean(totals[cut:]):.2f}")
 
@@ -166,37 +158,38 @@ def main():
 
     # ---------- CLASIFICACIÓN: overs a varios umbrales + BTTS (rápido) ----------
     for T in _THRESHOLDS:
-        y = [1 if t > T else 0 for t in totals]
+        y = (totals > T).astype(int)
         _run_clf(f"OVER {T} goles", logit, Xtr, Xte, y[:cut], y[cut:])
     _run_clf("BTTS (ambos marcan)", logit, Xtr, Xte, btts[:cut], btts[cut:])
 
     # ---------- REGRESIÓN: total de goles ----------
     print("\n  === TOTAL DE GOLES (regresión) ===")
     ytr, yte = totals[:cut], totals[cut:]
-    _reg_report("BASELINE media constante", yte, [np.mean(ytr)] * len(yte))
-    et_te = [e if e is not None else np.mean(ytr) for e in exp_tot[cut:]]
-    _reg_report("Heurística goles esperados", yte, et_te)
-    ha_te = [h if h is not None else np.mean(ytr) for h in h2h_avg[cut:]]
-    _reg_report("Heurística h2h_avg_goals", yte, ha_te)
+    m = float(np.mean(ytr))
+    _reg_report("BASELINE media constante", yte, np.full(len(yte), m))
+    # heurística goles esperados = columna exp_total (última de _FEATS)
+    j_exp = cols.index("exp_total")
+    et = np.where(np.isnan(Xte[:, j_exp]), m, Xte[:, j_exp])
+    _reg_report("Heurística goles esperados", yte, et)
+    j_h2h = cols.index("h2h_avg_goals")
+    ha = np.where(np.isnan(Xte[:, j_h2h]), m, Xte[:, j_h2h])
+    _reg_report("Heurística h2h_avg_goals", yte, ha)
     print("  entrenando modelo (gradient boosting)...", file=sys.stderr, flush=True)
     reg = HistGradientBoostingRegressor(max_depth=5, max_iter=200, random_state=42)
-    reg.fit([[(v if v is not None else np.nan) for v in r] for r in Xtr], ytr)
-    pred = reg.predict([[(v if v is not None else np.nan) for v in r] for r in Xte])
+    reg.fit(Xtr, ytr)
+    pred = reg.predict(Xte)
     _reg_report("Modelo gradient boosting", yte, pred)
-    corr = np.corrcoef(yte, pred)[0, 1]
-    print(f"    correlación modelo vs real: {corr:.3f}")
+    print(f"    correlación modelo vs real: {np.corrcoef(yte, pred)[0, 1]:.3f}")
 
     # ---------- CORRELACIONES: qué variable se asocia con el total ----------
     print("\n  Correlación de cada variable con el TOTAL de goles (test):")
-    Xte_arr = np.array([[(v if v is not None else np.nan) for v in r] for r in Xte],
-                       dtype=float)
-    yv = np.array(yte, dtype=float)
+    yv = np.asarray(yte, dtype=float)
     cors = []
     for j, name in enumerate(cols):
-        col = Xte_arr[:, j]
+        col = Xte[:, j].astype(float)
         mask = ~np.isnan(col)
         if mask.sum() > 100 and np.std(col[mask]) > 0:
-            cors.append((name, np.corrcoef(col[mask], yv[mask])[0, 1]))
+            cors.append((name, float(np.corrcoef(col[mask], yv[mask])[0, 1])))
     for name, c in sorted(cors, key=lambda x: abs(x[1]), reverse=True)[:10]:
         print(f"    {c:+.3f}  {name}")
 

@@ -1,11 +1,12 @@
-"""Carga rápida del dataset para los modelos (#7, #8).
+"""Carga rápida y LIVIANA del dataset para los modelos (#7, #8).
 
 Leer los ~61k JSON uno por uno tarda minutos. Este módulo los consolida UNA vez
 en un solo archivo (data/_dataset.jsonl, una línea por partido con solo lo que
-usan los modelos). Las siguientes corridas leen ese único archivo en segundos.
+usan los modelos). Las siguientes corridas leen ese archivo en segundos.
 
-Si aparecen partidos nuevos desde el último consolidado, avisa cuántos faltan;
-con rebuild=True (o --rebuild en los scripts) se reconstruye desde cero.
+IMPORTANTE (memoria): la VM tiene poca RAM (el bot corre 24/7). Por eso
+iter_records() es un GENERADOR que entrega un registro a la vez — nunca mantiene
+los 61k en memoria. Los scripts arman arrays numéricos compactos sobre la marcha.
 """
 import glob
 import json
@@ -31,10 +32,26 @@ def _slim(rec: dict) -> dict:
     }
 
 
-def _build(files: list) -> list:
+def iter_records(rebuild: bool = False):
+    """Generador: entrega un registro (slim) a la vez. Bajo consumo de memoria."""
+    if not rebuild and os.path.exists(_CACHE):
+        print(f"Cache: leyendo {os.path.basename(_CACHE)} en streaming...",
+              file=sys.stderr, flush=True)
+        with open(_CACHE, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    yield json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+        return
+
+    files = glob.glob(os.path.join(_DIR, "*.json"))
     print(f"Consolidando {len(files)} archivos (solo la primera vez)...",
           file=sys.stderr, flush=True)
-    recs = []
+    kept = 0
     with open(_CACHE, "w", encoding="utf-8") as out:
         for i, p in enumerate(files, 1):
             if i % 5000 == 0:
@@ -45,30 +62,8 @@ def _build(files: list) -> list:
             except (json.JSONDecodeError, OSError):
                 continue
             s = _slim(rec)
-            recs.append(s)
             out.write(json.dumps(s, ensure_ascii=False) + "\n")
-    print(f"Listo: {len(recs)} partidos en cache ({os.path.basename(_CACHE)}).",
+            kept += 1
+            yield s
+    print(f"Listo: {kept} partidos consolidados en {os.path.basename(_CACHE)}.",
           file=sys.stderr, flush=True)
-    return recs
-
-
-def load_records(rebuild: bool = False) -> list:
-    """Devuelve la lista de registros (slim). Rápido si ya hay cache."""
-    files = glob.glob(os.path.join(_DIR, "*.json"))
-    if not rebuild and os.path.exists(_CACHE):
-        recs = []
-        with open(_CACHE, "r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if line:
-                    try:
-                        recs.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        continue
-        nuevos = len(files) - len(recs)
-        print(f"Cache: {len(recs)} partidos leídos al instante.", file=sys.stderr, flush=True)
-        if nuevos > 500:
-            print(f"  (hay ~{nuevos} partidos nuevos desde el último consolidado; "
-                  f"corre con --rebuild para incluirlos)", file=sys.stderr, flush=True)
-        return recs
-    return _build(files)

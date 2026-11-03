@@ -10,17 +10,16 @@ equipo, hora...) predice MEJOR que el Elo solo? Si no, el Elo ya es el techo.
 - Métricas en test: Brier, log-loss, AUC, accuracy + CALIBRACIÓN por banda.
 - Baseline de referencia: la probabilidad del Elo (elo_exp_a) ya guardada.
 
+Memoria: lee en streaming y arma arrays float32 (la VM tiene poca RAM).
+
 Uso en el server:
     source .venv/bin/activate
-    pip install scikit-learn
-    python train_model.py
+    python train_model.py            # usa el cache si existe (segundos)
+    python train_model.py --rebuild  # reconsolida desde los JSON crudos
 """
-import os
 import sys
 
 import dataset_cache
-
-_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "matches")
 
 # features numéricas que guarda persistence.build_features
 _FEATS = [
@@ -33,6 +32,7 @@ _FEATS = [
     "elo_a", "elo_b", "elo_exp_a", "elo_games_a", "elo_games_b",
     "team_wr_a", "team_wr_b",
 ]
+_COLS = _FEATS + ["elo_diff", "career_wr_diff", "form_wr_diff", "team_wr_diff", "h2h_diff"]
 
 
 def _diffs(f):
@@ -50,8 +50,9 @@ def _diffs(f):
 
 
 def load_dataset(records):
+    """Consume el generador y devuelve arrays compactos (bajo en RAM)."""
+    import numpy as np
     rows, ys, dates, elo_base = [], [], [], []
-    cols = _FEATS + ["elo_diff", "career_wr_diff", "form_wr_diff", "team_wr_diff", "h2h_diff"]
     for rec in records:
         feat = rec.get("features") or {}
         res = rec.get("result") or {}
@@ -59,21 +60,23 @@ def load_dataset(records):
             continue   # solo registros CON snapshot de features
         if res.get("outcome") not in ("acierto", "fallo", "empate"):
             continue   # cerrado y decidible
-        winner = res.get("winner")
-        y = 1 if winner == rec.get("player1") else 0
+        y = 1 if res.get("winner") == rec.get("player1") else 0
         f = dict(feat); f.update(_diffs(feat))
-        rows.append([f.get(c) for c in cols])
+        rows.append([(f.get(c) if f.get(c) is not None else np.nan) for c in _COLS])
         ys.append(y)
         dates.append(rec.get("date") or "")
-        elo_base.append(feat.get("elo_exp_a"))
-    return cols, rows, ys, dates, elo_base
+        eb = feat.get("elo_exp_a")
+        elo_base.append(eb if eb is not None else np.nan)
+    X = np.asarray(rows, dtype=np.float32)
+    return (_COLS, X, np.asarray(ys, dtype=np.int8), dates,
+            np.asarray(elo_base, dtype=np.float32))
 
 
 def _report(name, y_true, p):
     import numpy as np
     from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score, accuracy_score
-    p = np.clip(np.array(p, dtype=float), 1e-6, 1 - 1e-6)
-    y = np.array(y_true)
+    p = np.clip(np.asarray(p, dtype=float), 1e-6, 1 - 1e-6)
+    y = np.asarray(y_true)
     acc = accuracy_score(y, (p >= 0.5).astype(int))
     print(f"\n  [{name}]  Brier {brier_score_loss(y, p):.4f} · "
           f"logloss {log_loss(y, p):.4f} · AUC {roc_auc_score(y, p):.3f} · "
@@ -103,27 +106,25 @@ def main():
         raise SystemExit(1)
 
     rebuild = "--rebuild" in sys.argv
-    records = dataset_cache.load_records(rebuild=rebuild)
-    cols, rows, ys, dates, elo_base = load_dataset(records)
-    n = len(rows)
+    cols, X, ys, dates, elo_base = load_dataset(dataset_cache.iter_records(rebuild))
+    n = X.shape[0]
     print(f"Dataset: {n} partidos con features + resultado.")
     if n < 500:
         print("Muy pocos datos con features todavía (necesitamos ~1000+). "
               "Deja acumular y reintenta.")
         return
 
-    order = sorted(range(n), key=lambda i: dates[i])
-    rows = [rows[i] for i in order]; ys = [ys[i] for i in order]
-    elo_base = [elo_base[i] for i in order]
+    order = np.argsort(np.asarray(dates))
+    X = X[order]; ys = ys[order]; elo_base = elo_base[order]
     cut = int(n * 0.8)
-    Xtr, Xte = rows[:cut], rows[cut:]
+    Xtr, Xte = X[:cut], X[cut:]
     ytr, yte = ys[:cut], ys[cut:]
     elo_te = elo_base[cut:]
     print(f"Train {len(Xtr)} · Test {len(Xte)} (split temporal 80/20)")
-    print(f"Tasa base: el jugador 1 gana {round(100*sum(yte)/len(yte))}% en test")
+    print(f"Tasa base: el jugador 1 gana {round(100*float(sum(yte))/len(yte))}% en test")
 
     # baseline: la probabilidad del Elo
-    eb = [(e if e is not None else 0.5) for e in elo_te]
+    eb = np.where(np.isnan(elo_te), 0.5, elo_te)
     _report("BASELINE Elo (elo_exp_a)", yte, eb)
 
     # modelo 1: regresión logística
@@ -132,10 +133,11 @@ def main():
     logit.fit(Xtr, ytr)
     _report("Regresión logística", yte, logit.predict_proba(Xte)[:, 1])
 
-    # modelo 2: Random Forest
+    # modelo 2: Random Forest (n_jobs=1 para no disparar la RAM en la VM chica)
+    print("  entrenando Random Forest...", file=sys.stderr, flush=True)
     rf = make_pipeline(SimpleImputer(strategy="median"),
-                       RandomForestClassifier(n_estimators=300, max_depth=8,
-                                              min_samples_leaf=20, n_jobs=-1,
+                       RandomForestClassifier(n_estimators=200, max_depth=8,
+                                              min_samples_leaf=20, n_jobs=1,
                                               random_state=42))
     rf.fit(Xtr, ytr)
     _report("Random Forest", yte, rf.predict_proba(Xte)[:, 1])
