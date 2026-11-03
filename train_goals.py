@@ -102,12 +102,15 @@ def _calib(y_true, p):
 
 
 def _run_clf(label, model_fn, Xtr, Xte, ytr, yte):
-    base = float(sum(ytr)) / len(ytr)          # tasa base en TRAIN
+    import numpy as np
+    # float64 explícito: ytr puede venir como int8 y sum() se desborda (overflow)
+    base = float(np.mean(np.asarray(ytr, dtype=np.float64)))   # tasa base en TRAIN
     if base <= 0.0 or base >= 1.0:
         print(f"\n  === {label} ===  (tasa base {round(100*base)}% — sin mercado, se omite)")
         return
+    real = float(np.mean(np.asarray(yte, dtype=np.float64)))
     print(f"\n  === {label} ===  (tasa base train {round(100*base)}% · "
-          f"real test {round(100*float(sum(yte))/len(yte))}%)")
+          f"real test {round(100*real)}%)")
     _clf_report("BASELINE tasa base", yte, [base] * len(yte))
     model = model_fn()
     model.fit(Xtr, ytr)
