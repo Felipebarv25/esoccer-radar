@@ -15,10 +15,10 @@ Uso en el server:
     pip install scikit-learn
     python train_model.py
 """
-import glob
-import json
 import os
 import sys
+
+import dataset_cache
 
 _DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "matches")
 
@@ -49,19 +49,10 @@ def _diffs(f):
     }
 
 
-def load_dataset():
+def load_dataset(records):
     rows, ys, dates, elo_base = [], [], [], []
     cols = _FEATS + ["elo_diff", "career_wr_diff", "form_wr_diff", "team_wr_diff", "h2h_diff"]
-    files = glob.glob(os.path.join(_DIR, "*.json"))
-    print(f"Leyendo {len(files)} archivos de data/matches...", file=sys.stderr, flush=True)
-    for i, p in enumerate(files, 1):
-        if i % 2000 == 0:
-            print(f"  ...{i}/{len(files)}", file=sys.stderr, flush=True)
-        try:
-            with open(p, "r", encoding="utf-8") as fh:
-                rec = json.load(fh)
-        except (json.JSONDecodeError, OSError):
-            continue
+    for rec in records:
         feat = rec.get("features") or {}
         res = rec.get("result") or {}
         if not feat or feat.get("elo_a") is None:
@@ -111,7 +102,9 @@ def main():
         print("Falta scikit-learn. Instálalo:  pip install scikit-learn", file=sys.stderr)
         raise SystemExit(1)
 
-    cols, rows, ys, dates, elo_base = load_dataset()
+    rebuild = "--rebuild" in sys.argv
+    records = dataset_cache.load_records(rebuild=rebuild)
+    cols, rows, ys, dates, elo_base = load_dataset(records)
     n = len(rows)
     print(f"Dataset: {n} partidos con features + resultado.")
     if n < 500:

@@ -6,13 +6,15 @@ que el usuario pidió: cantidad de goles. Lo honesto primero:
   La fuente (esportsbattle) SOLO publica el MARCADOR. No hay córners, ni tiros, ni
   posesión, ni tarjetas en ningún endpoint — así que esas NO se pueden modelar.
   Lo que SÍ sale del marcador + la foto pre-partido (leak-free):
-    - Total de goles  → Over/Under 2.5 / 3.5 / 4.5  (clasificación)
+    - Total de goles  → Over/Under en varios umbrales  (clasificación)
     - Total de goles  → regresión (¿predecimos el número?)
     - BTTS            → ambos marcan (clasificación)
 
-La pregunta de negocio: ¿un modelo predice el total MEJOR que la tasa base / que la
-heurística de "goles esperados"? Si no, el mercado de totales no es batible con
-nuestros datos (igual que concluimos en tenis de mesa).
+Como el promedio ronda 6 goles, los umbrales útiles están CERCA del promedio
+(5.5, 6.5, 7.5). El Over 2.5 es casi siempre sí (no hay mercado).
+
+La pregunta de negocio: ¿un modelo predice el total MEJOR que la tasa base / que
+la heurística de "goles esperados"? Si no, el mercado de totales no es batible.
 
 - Split TEMPORAL (entrena viejo, prueba reciente) → sin leakage.
 - Clasificación: Brier/logloss/AUC + CALIBRACIÓN por banda vs tasa base.
@@ -20,15 +22,12 @@ nuestros datos (igual que concluimos en tenis de mesa).
 
 Uso en el server:
     source .venv/bin/activate
-    pip install scikit-learn
-    python train_goals.py
+    python train_goals.py            # usa el cache si existe (segundos)
+    python train_goals.py --rebuild  # reconsolida desde los JSON crudos
 """
-import glob
-import json
-import os
 import sys
 
-_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "matches")
+import dataset_cache
 
 # features numéricas pre-partido relevantes para GOLES (de persistence.build_features)
 _FEATS = [
@@ -43,6 +42,8 @@ _FEATS = [
     "exp_goals_a", "exp_goals_b", "exp_total",
 ]
 
+_THRESHOLDS = (2.5, 4.5, 5.5, 6.5, 7.5)   # umbrales de over a evaluar
+
 
 def _eng(f):
     """Variables derivadas: estimación de goles esperados por la forma reciente."""
@@ -55,20 +56,9 @@ def _eng(f):
             "exp_goals_a": ega, "exp_goals_b": egb, "exp_total": et}
 
 
-def load_dataset():
-    rows, dates = [], []
-    totals, over25, over35, over45, btts = [], [], [], [], []
-    exp_tot, h2h_avg = [], []
-    files = glob.glob(os.path.join(_DIR, "*.json"))
-    print(f"Leyendo {len(files)} archivos de data/matches...", file=sys.stderr, flush=True)
-    for i, p in enumerate(files, 1):
-        if i % 2000 == 0:
-            print(f"  ...{i}/{len(files)}", file=sys.stderr, flush=True)
-        try:
-            with open(p, "r", encoding="utf-8") as fh:
-                rec = json.load(fh)
-        except (json.JSONDecodeError, OSError):
-            continue
+def load_dataset(records):
+    rows, dates, totals, btts, exp_tot, h2h_avg = [], [], [], [], [], []
+    for rec in records:
         feat = rec.get("features") or {}
         res = rec.get("result") or {}
         if not feat:
@@ -78,17 +68,12 @@ def load_dataset():
             continue
         f = dict(feat); f.update(_eng(feat))
         rows.append([f.get(c) for c in _FEATS])
-        tot = sa + sb
-        totals.append(tot)
-        over25.append(1 if tot >= 3 else 0)
-        over35.append(1 if tot >= 4 else 0)
-        over45.append(1 if tot >= 5 else 0)
+        totals.append(sa + sb)
         btts.append(1 if (sa > 0 and sb > 0) else 0)
         exp_tot.append(f.get("exp_total"))
         h2h_avg.append(f.get("h2h_avg_goals"))
         dates.append(rec.get("date") or "")
-    return (_FEATS, rows, dates, totals, over25, over35, over45, btts,
-            exp_tot, h2h_avg)
+    return _FEATS, rows, dates, totals, btts, exp_tot, h2h_avg
 
 
 def _clf_report(name, y_true, p):
@@ -120,7 +105,6 @@ def _calib(y_true, p):
 
 
 def _run_clf(label, Xtr, Xte, ytr, yte):
-    import numpy as np
     from sklearn.impute import SimpleImputer
     from sklearn.preprocessing import StandardScaler
     from sklearn.linear_model import LogisticRegression
@@ -128,6 +112,9 @@ def _run_clf(label, Xtr, Xte, ytr, yte):
     from sklearn.pipeline import make_pipeline
 
     base = sum(ytr) / len(ytr)          # tasa base en TRAIN
+    if base in (0.0, 1.0):              # target degenerado (sin variación)
+        print(f"\n  === {label} ===  (tasa base {round(100*base)}% — sin mercado, se omite)")
+        return
     print(f"\n  === {label} ===  (tasa base train {round(100*base)}% · "
           f"real test {round(100*sum(yte)/len(yte))}%)")
     _clf_report("BASELINE tasa base", yte, [base] * len(yte))
@@ -135,18 +122,17 @@ def _run_clf(label, Xtr, Xte, ytr, yte):
     logit = make_pipeline(SimpleImputer(strategy="median"), StandardScaler(),
                           LogisticRegression(max_iter=1000))
     logit.fit(Xtr, ytr)
-    pl = logit.predict_proba(Xte)[:, 1]
-    _clf_report("Regresión logística", yte, pl)
+    _clf_report("Regresión logística", yte, logit.predict_proba(Xte)[:, 1])
 
+    print("      entrenando Random Forest...", file=sys.stderr, flush=True)
     rf = make_pipeline(SimpleImputer(strategy="median"),
-                       RandomForestClassifier(n_estimators=300, max_depth=8,
-                                              min_samples_leaf=20, n_jobs=-1,
+                       RandomForestClassifier(n_estimators=150, max_depth=8,
+                                              min_samples_leaf=25, n_jobs=-1,
                                               random_state=42))
     rf.fit(Xtr, ytr)
     pr = rf.predict_proba(Xte)[:, 1]
     _clf_report("Random Forest", yte, pr)
     _calib(yte, pr)
-    return rf
 
 
 def _reg_report(name, y_true, pred):
@@ -168,8 +154,9 @@ def main():
         print("Falta scikit-learn. Instálalo:  pip install scikit-learn", file=sys.stderr)
         raise SystemExit(1)
 
-    (cols, rows, dates, totals, over25, over35, over45, btts,
-     exp_tot, h2h_avg) = load_dataset()
+    rebuild = "--rebuild" in sys.argv
+    records = dataset_cache.load_records(rebuild=rebuild)
+    cols, rows, dates, totals, btts, exp_tot, h2h_avg = load_dataset(records)
     n = len(rows)
     print(f"Dataset: {n} partidos cerrados con marcador + features.")
     if n < 500:
@@ -178,8 +165,7 @@ def main():
 
     order = sorted(range(n), key=lambda i: dates[i])
     def srt(a): return [a[i] for i in order]
-    rows = srt(rows); totals = srt(totals)
-    over25 = srt(over25); over35 = srt(over35); over45 = srt(over45); btts = srt(btts)
+    rows = srt(rows); totals = srt(totals); btts = srt(btts)
     exp_tot = srt(exp_tot); h2h_avg = srt(h2h_avg)
 
     cut = int(n * 0.8)
@@ -187,27 +173,28 @@ def main():
     print(f"Train {len(Xtr)} · Test {len(Xte)} (split temporal 80/20)")
     print(f"Promedio de goles por partido (test): {np.mean(totals[cut:]):.2f}")
 
-    # ---------- CLASIFICACIÓN: overs + BTTS ----------
-    for lbl, y in (("OVER 2.5 goles", over25), ("OVER 3.5 goles", over35),
-                   ("OVER 4.5 goles", over45), ("BTTS (ambos marcan)", btts)):
-        _run_clf(lbl, Xtr, Xte, y[:cut], y[cut:])
+    # ---------- CLASIFICACIÓN: overs a varios umbrales + BTTS ----------
+    for T in _THRESHOLDS:
+        y = [1 if t > T else 0 for t in totals]
+        _run_clf(f"OVER {T} goles", Xtr, Xte, y[:cut], y[cut:])
+    _run_clf("BTTS (ambos marcan)", Xtr, Xte, btts[:cut], btts[cut:])
 
     # ---------- REGRESIÓN: total de goles ----------
     print("\n  === TOTAL DE GOLES (regresión) ===")
     ytr, yte = totals[:cut], totals[cut:]
     _reg_report("BASELINE media constante", yte, [np.mean(ytr)] * len(yte))
-    # heurística: goles esperados por la forma
     et_te = [e if e is not None else np.mean(ytr) for e in exp_tot[cut:]]
     _reg_report("Heurística goles esperados", yte, et_te)
     ha_te = [h if h is not None else np.mean(ytr) for h in h2h_avg[cut:]]
     _reg_report("Heurística h2h_avg_goals", yte, ha_te)
+    print("  entrenando Random Forest (regresión)...", file=sys.stderr, flush=True)
     reg = make_pipeline(SimpleImputer(strategy="median"),
-                        RandomForestRegressor(n_estimators=300, max_depth=8,
-                                              min_samples_leaf=20, n_jobs=-1,
+                        RandomForestRegressor(n_estimators=150, max_depth=8,
+                                              min_samples_leaf=25, n_jobs=-1,
                                               random_state=42))
     reg.fit(Xtr, ytr)
     pred = reg.predict(Xte)
-    mae_model = _reg_report("Random Forest (modelo)", yte, pred)
+    _reg_report("Random Forest (modelo)", yte, pred)
     corr = np.corrcoef(yte, pred)[0, 1]
     print(f"    correlación modelo vs real: {corr:.3f}")
 
