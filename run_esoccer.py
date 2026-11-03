@@ -49,6 +49,17 @@ def main():
     except Exception as e:
         print(f"[WARN] no pude iniciar report_cache: {e}", file=sys.stderr)
 
+    # Modelo de goles (calibrado): proyección de over por partido. Si no se ha
+    # exportado todavía (goals_model.py), queda en None y la tarjeta no lo muestra.
+    try:
+        import goals_model
+        goals_pred = goals_model.load()
+        print(f"[goals] modelo {'cargado' if goals_pred else 'no exportado aún (corre goals_model.py)'}",
+              file=sys.stderr)
+    except Exception as e:
+        goals_pred = None
+        print(f"[WARN] goals_model: {e}", file=sys.stderr)
+
     # Vigilancia de salud: avisa al canal de reportes si la API se bloquea o
     # deja de emitir partidos por mucho tiempo.
     from watchdog import Watchdog
@@ -133,8 +144,17 @@ def main():
                 elo_snap = elo.snapshot(p["player1"], p["player2"])
             except Exception as e:
                 print(f"[WARN] elo.snapshot {mid}: {e}", file=sys.stderr)
+            # Proyección de goles del modelo (calibrada) para la tarjeta.
+            goals_out = None
+            if goals_pred is not None:
+                try:
+                    feats = persistence.build_features(p, a, elo_snap)
+                    goals_out = goals_pred.predict(feats)
+                except Exception as e:
+                    print(f"[WARN] goals predict {mid}: {e}", file=sys.stderr)
             msg_id = notifier.send(format_match(p, a, edges=edges, elo=elo_snap,
-                                                hour_stat=hour_stat, top_combo=top_hit))   # enviar primero → obtener message_id
+                                                hour_stat=hour_stat, top_combo=top_hit,
+                                                goals=goals_out))   # enviar primero → obtener message_id
 
             # Tarjeta-IMAGEN para las mejores oportunidades (⭐⭐ ALTA o 💎 TOP).
             sc = a.get("score_a", 50)

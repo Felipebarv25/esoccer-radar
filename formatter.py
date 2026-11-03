@@ -38,7 +38,8 @@ def _reliability(h2h_matches, form_games_a, form_games_b) -> str:
 
 
 def format_match(meta: dict, a: dict, edges: list = None, elo: dict = None,
-                 hour_stat: dict = None, top_combo: dict = None) -> str:
+                 hour_stat: dict = None, top_combo: dict = None,
+                 goals: dict = None) -> str:
     """meta: {player1,team1,player2,team2,date}. a: analyze_match(...).
 
     `edges`: ventajas históricas detectadas (analytics.detect_edges); si hay,
@@ -140,6 +141,13 @@ def format_match(meta: dict, a: dict, edges: list = None, elo: dict = None,
         )
         if h["last5"]:
             msg += "📋 " + " | ".join(x.split(" (")[0] for x in h["last5"][:3]) + "\n"
+    # Proyección de goles del MODELO (validado y calibrado: el over SÍ se predice).
+    if goals and goals.get("overs"):
+        tot = goals.get("total")
+        ov = goals["overs"]
+        parts = " · ".join(f"O{T:g} {round(100 * ov[T])}%" for T in sorted(ov))
+        cab = f"🎯 <b>Proyección de goles (modelo):</b> ~{tot:.1f} esperados\n" if tot else "🎯 <b>Proyección de goles (modelo):</b>\n"
+        msg += cab + f"   {parts}  <i>(prob. calibrada)</i>\n"
     msg += f"\n🔎 Confiabilidad: {rel}\n"
     msg += ("<i>Fuerza relativa + datos, NO probabilidad ni pronóstico. "
             "No apuestes a todo. Solo lo que puedas perder.</i>")
